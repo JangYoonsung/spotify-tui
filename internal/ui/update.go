@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -218,6 +219,18 @@ func radioCmd(client *spotifyapi.Client, contextURI string) tea.Cmd {
 // playlist the tracks box is showing, played straight (no shuffle/repeat).
 // There the queue endpoint reports a fake wrap-around to the first track, so
 // callers substitute Spotify's real radio autoplay instead.
+// noteRateLimit records a 429's back-off window so tickMsg suspends polling
+// until it passes.
+func (m *Model) noteRateLimit(err error) {
+	var rl *spotifyapi.RateLimitError
+	if errors.As(err, &rl) {
+		until := time.Now().Add(rl.RetryAfter)
+		if until.After(m.rateLimitedUntil) {
+			m.rateLimitedUntil = until
+		}
+	}
+}
+
 func (m Model) atPlaylistEnd() bool {
 	if m.state == nil || m.state.RepeatState != "off" || m.state.ShuffleState {
 		return false
@@ -270,9 +283,36 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tickMsg:
+		// Backing off after a 429: keep the tick alive but issue no API
+		// calls until Spotify's Retry-After window passes, so the widget
+		// stops feeding the rate limit.
+		if time.Now().Before(m.rateLimitedUntil) {
+			return m, tickCmd(m.cfg.PollInterval)
+		}
 		var cmds []tea.Cmd
 		if !m.actionInFlight {
 			cmds = append(cmds, refreshCmd(m.client))
+		}
+		// Recover a failed track-list load: the initial fetch (restore /
+		// context-follow) runs once, so if it errored (e.g. a transient 429)
+		// the tracks box stays empty forever and every playlist-aware
+		// judgment (atPlaylistEnd, next) breaks. Re-fetch when playback is on
+		// a playlist the box should be showing but isn't.
+		if m.state != nil && !m.playlistTracks.loading && time.Since(m.lastTracksReload) > 15*time.Second {
+			if id, ok := strings.CutPrefix(m.state.ContextURI, "spotify:playlist:"); ok &&
+				id == m.currentPlaylistID && len(m.playlistTracks.list.Items()) == 0 {
+				m.lastTracksReload = time.Now()
+				m.playlistTracks = loadingListState()
+				cmds = append(cmds, playlistTracksCmd(m.client, id), m.spin.Tick)
+			}
+		}
+		// At the playlist's end the queue's wrap-around is a lie — fetch
+		// Spotify's real radio here (not just on track change, which the
+		// tracklist-load race can miss). Gated by radioForContext so it's
+		// one librespot session per context, not per tick.
+		if m.atPlaylistEnd() && m.radioForContext != m.state.ContextURI {
+			m.radioForContext = m.state.ContextURI
+			cmds = append(cmds, radioCmd(m.client, m.state.ContextURI))
 		}
 		cmds = append(cmds, tickCmd(m.cfg.PollInterval))
 		return m, tea.Batch(cmds...)
@@ -295,6 +335,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.lastRefresh = time.Now()
 		m.lastErr = msg.err
 		if msg.err != nil {
+			m.noteRateLimit(msg.err)
 			return m, nil
 		}
 		if msg.state != nil && (m.state == nil || msg.state.Item.ID != m.state.Item.ID) {

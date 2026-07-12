@@ -250,7 +250,7 @@ func runDiagnoseQueue(client *spotifyapi.Client) error {
 	if state != nil {
 		fmt.Printf("current: %-24s %s  (repeat=%s shuffle=%v playing=%v)\n",
 			state.Item.ID, state.Item.Name, state.RepeatState, state.ShuffleState, state.IsPlaying)
-		fmt.Printf("context: %s  device: %s\n", state.ContextURI, state.Device.Name)
+		fmt.Printf("context: %s  device: %s (id=%s active=%v)\n", state.ContextURI, state.Device.Name, state.Device.ID, state.Device.IsActive)
 	} else {
 		fmt.Println("current: (nothing playing)")
 	}

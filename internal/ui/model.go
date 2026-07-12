@@ -69,6 +69,13 @@ type Model struct {
 	// context they were fetched for, so a stale fetch isn't reused.
 	radioTracks     []spotifyapi.Track
 	radioForContext string
+	// lastTracksReload throttles the tick-driven track-list recovery so a
+	// persistent failure (e.g. a rate limit) isn't hammered every poll.
+	lastTracksReload time.Time
+	// rateLimitedUntil suspends polling after a 429 (Spotify's Retry-After),
+	// so the widget backs off instead of hammering the API and keeping the
+	// limit alive.
+	rateLimitedUntil time.Time
 	// likedCurrent/likedForID: whether the CURRENT track is in Liked Songs
 	// — checked once per track change, toggled optimistically by the l key.
 	likedCurrent bool

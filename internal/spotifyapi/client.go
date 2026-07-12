@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
+	"time"
 )
 
 const baseURL = "https://api.spotify.com/v1"
@@ -15,7 +17,19 @@ const baseURL = "https://api.spotify.com/v1"
 var (
 	ErrNoActiveDevice = errors.New("no active Spotify device — open Spotify on a device first")
 	ErrForbidden      = errors.New("forbidden (need Premium, or restricted device)")
+	ErrRateLimited    = errors.New("rate limited")
 )
+
+// RateLimitError carries the Retry-After delay from a 429 so the UI can back
+// off exactly that long instead of hammering the API.
+type RateLimitError struct {
+	RetryAfter time.Duration
+}
+
+func (e *RateLimitError) Error() string {
+	return fmt.Sprintf("rate limited, retry after %s", e.RetryAfter)
+}
+func (e *RateLimitError) Unwrap() error { return ErrRateLimited }
 
 // TokenSource returns a valid bearer access token, refreshing it if needed.
 // Implemented by a closure over spotifyauth.EnsureFresh so this package
@@ -92,6 +106,22 @@ func classifyStatus(resp *http.Response, respBody []byte) error {
 		return fmt.Errorf("%w: %s", ErrNoActiveDevice, string(respBody))
 	case http.StatusForbidden:
 		return fmt.Errorf("%w: %s", ErrForbidden, string(respBody))
+	case http.StatusTooManyRequests:
+		// Retry-After is in seconds; default to 10s if absent/unparseable.
+		// Capped at 60s: Spotify can hand out multi-hour windows after heavy
+		// abuse, but honoring those verbatim would freeze the widget for the
+		// day — better to keep quietly re-probing at a light cadence and
+		// recover the moment the limit lifts.
+		retry := 10 * time.Second
+		if s := resp.Header.Get("Retry-After"); s != "" {
+			if n, err := strconv.Atoi(s); err == nil && n > 0 {
+				retry = time.Duration(n) * time.Second
+			}
+		}
+		if retry > 60*time.Second {
+			retry = 60 * time.Second
+		}
+		return &RateLimitError{RetryAfter: retry}
 	default:
 		return fmt.Errorf("spotify API error: HTTP %d: %s", resp.StatusCode, string(respBody))
 	}
