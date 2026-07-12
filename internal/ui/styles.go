@@ -76,7 +76,7 @@ func boxTopStyled(title, trailing string, width int, style lipgloss.Style) strin
 	if fill < 0 {
 		fill = 0
 	}
-	return style.Render(boxTL+left) + strings.Repeat(boxH, fill) + style.Render(right+boxTR)
+	return style.Render(boxTL + left + strings.Repeat(boxH, fill) + right + boxTR)
 }
 
 func boxBottomStyled(width int, style lipgloss.Style) string {
