@@ -22,7 +22,7 @@ func TestListBoxHugsContentAndWidth(t *testing.T) {
 		listItem{label: "내 플레이리스트 #1", id: "2"}, // wide runes must not break padding
 	})
 
-	out := renderPlaylistsBox(l, width, "x")
+	out := renderPlaylistsBox(l, width, "x", true)
 	lines := strings.Split(out, "\n")
 	if len(lines) != 4 { // top border + 2 items + bottom border
 		t.Fatalf("box has %d lines, want 4 (must hug content, not pad to list height):\n%s", len(lines), out)

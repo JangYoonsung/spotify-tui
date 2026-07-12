@@ -8,6 +8,9 @@ type PlaybackState struct {
 	Item         Track
 	ShuffleState bool
 	RepeatState  string // "off" | "track" | "context"
+	// ContextURI is what playback is playing FROM, e.g.
+	// "spotify:playlist:<id>" — empty for bare single-URI playback.
+	ContextURI string
 }
 
 type Device struct {
@@ -30,6 +33,7 @@ type Track struct {
 	ID         string // "spotify:track:"+ID for PlayURIs
 	Name       string
 	Artists    []string
+	ArtistIDs  []string // parallel to Artists; feeds GET /artists/{id}/top-tracks
 	AlbumName  string
 	DurationMs int
 	Images     []Image // from album.images
@@ -45,6 +49,9 @@ type rawPlaybackState struct {
 	Item         *rawTrack `json:"item"`
 	ShuffleState bool      `json:"shuffle_state"`
 	RepeatState  string    `json:"repeat_state"`
+	Context      *struct {
+		URI string `json:"uri"`
+	} `json:"context"` // null for bare single-URI playback
 }
 
 type rawDevice struct {
@@ -66,6 +73,7 @@ type rawTrack struct {
 	Name       string `json:"name"`
 	DurationMs int    `json:"duration_ms"`
 	Artists    []struct {
+		ID   string `json:"id"`
 		Name string `json:"name"`
 	} `json:"artists"`
 	Album struct {
@@ -96,13 +104,16 @@ func toImages(raw []rawImage) []Image {
 
 func (t rawTrack) toTrack() Track {
 	artists := make([]string, 0, len(t.Artists))
+	artistIDs := make([]string, 0, len(t.Artists))
 	for _, a := range t.Artists {
 		artists = append(artists, a.Name)
+		artistIDs = append(artistIDs, a.ID)
 	}
 	return Track{
 		ID:         t.ID,
 		Name:       t.Name,
 		Artists:    artists,
+		ArtistIDs:  artistIDs,
 		AlbumName:  t.Album.Name,
 		DurationMs: t.DurationMs,
 		Images:     toImages(t.Album.Images),
@@ -119,6 +130,9 @@ func (s rawPlaybackState) toPlaybackState() PlaybackState {
 	}
 	if s.Item != nil {
 		ps.Item = s.Item.toTrack()
+	}
+	if s.Context != nil {
+		ps.ContextURI = s.Context.URI
 	}
 	return ps
 }

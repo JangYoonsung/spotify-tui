@@ -16,6 +16,9 @@ type keyMap struct {
 	Devices      key.Binding
 	QueueAdd     key.Binding
 	PlayPlaylist key.Binding
+	Queue        key.Binding
+	Recent       key.Binding
+	Like         key.Binding
 	Help         key.Binding
 	Escape       key.Binding
 	Up           key.Binding
@@ -76,6 +79,18 @@ var keys = keyMap{
 		key.WithKeys("P"),
 		key.WithHelp("P", "play playlist"),
 	),
+	Queue: key.NewBinding(
+		key.WithKeys("u"),
+		key.WithHelp("u", "queue view"),
+	),
+	Recent: key.NewBinding(
+		key.WithKeys("h"),
+		key.WithHelp("h", "history"),
+	),
+	Like: key.NewBinding(
+		key.WithKeys("l"),
+		key.WithHelp("l", "♥ like"),
+	),
 	Help: key.NewBinding(
 		key.WithKeys("?"),
 		key.WithHelp("?", "more"),
@@ -120,8 +135,8 @@ func (c contextKeys) ShortHelp() []key.Binding  { return c.short }
 func (c contextKeys) FullHelp() [][]key.Binding { return c.full }
 
 func keysFor(s screen, focusTracks bool) contextKeys {
-	controls := []key.Binding{keys.PlayPause, keys.Next, keys.Previous, keys.VolumeUp, keys.VolumeDown, keys.Shuffle, keys.Repeat}
-	global := []key.Binding{keys.Search, keys.Devices, keys.Refresh, keys.Help, keys.Quit}
+	controls := []key.Binding{keys.PlayPause, keys.Next, keys.Previous, keys.VolumeUp, keys.VolumeDown, keys.Shuffle, keys.Repeat, keys.Like}
+	global := []key.Binding{keys.Search, keys.Devices, keys.Queue, keys.Recent, keys.Refresh, keys.Help, keys.Quit}
 
 	switch s {
 	case screenSearch:
@@ -137,6 +152,14 @@ func keysFor(s screen, focusTracks bool) contextKeys {
 			short: []key.Binding{enterSwitchDevice, keys.Up, keys.Down, keys.Escape, keys.Quit},
 			full: [][]key.Binding{
 				{enterSwitchDevice, keys.Up, keys.Down},
+				{keys.Escape, keys.Help, keys.Quit},
+			},
+		}
+	case screenQueue, screenRecent:
+		return contextKeys{
+			short: []key.Binding{enterPlayTrack, keys.QueueAdd, keys.Up, keys.Down, keys.Escape, keys.Quit},
+			full: [][]key.Binding{
+				{enterPlayTrack, keys.QueueAdd, keys.Up, keys.Down},
 				{keys.Escape, keys.Help, keys.Quit},
 			},
 		}

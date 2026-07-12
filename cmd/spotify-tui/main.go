@@ -57,6 +57,8 @@ func run() error {
 	client := spotifyapi.New(tokenSource)
 
 	switch {
+	case cfg.DiagnoseDeviceID != "" && cfg.DiagnosePlayCtx != "" && cfg.DiagnosePlayURI != "":
+		return report1("PlayContextAt", client.PlayContextAt(cfg.DiagnoseDeviceID, cfg.DiagnosePlayCtx, cfg.DiagnosePlayURI))
 	case cfg.DiagnoseDeviceID != "" && cfg.DiagnosePlayCtx != "":
 		return report1("PlayContext", client.PlayContext(cfg.DiagnoseDeviceID, cfg.DiagnosePlayCtx))
 	case cfg.DiagnoseDeviceID != "" && cfg.DiagnosePlayURI != "":
@@ -71,6 +73,48 @@ func run() error {
 		return runDiagnoseArt(cfg.DiagnoseArt, cfg.ExperimentalKittyArt)
 	case cfg.DiagnosePlaylistID != "":
 		return runDiagnosePlaylistTracks(client, cfg.DiagnosePlaylistID)
+	case cfg.DiagnoseQueue:
+		return runDiagnoseQueue(client)
+	case cfg.DiagnoseAddQueue != "":
+		return report1("AddToQueue", client.AddToQueue(cfg.DiagnoseAddQueue))
+	case cfg.DiagnoseSkip:
+		return report1("Next", client.Next())
+	case cfg.DiagnoseRecent:
+		tracks, err := client.GetRecentlyPlayed(10)
+		if err != nil {
+			return err
+		}
+		for _, t := range tracks {
+			fmt.Printf("recent: %-24s %s — %v %v\n", t.ID, t.Name, t.Artists, t.ArtistIDs)
+		}
+		return nil
+	case cfg.DiagnoseTopTracks != "":
+		tracks, err := client.GetArtistTopTracks(cfg.DiagnoseTopTracks)
+		if err != nil {
+			return err
+		}
+		for _, t := range tracks {
+			fmt.Printf("top: %-24s %s — %v\n", t.ID, t.Name, t.Artists)
+		}
+		return nil
+	case cfg.DiagnoseMyTop:
+		tracks, err := client.GetMyTopTracks(10)
+		if err != nil {
+			return err
+		}
+		for _, t := range tracks {
+			fmt.Printf("mytop: %-24s %s — %v\n", t.ID, t.Name, t.Artists)
+		}
+		return nil
+	case cfg.DiagnoseRecommend != "":
+		tracks, err := client.GetRecommendations(cfg.DiagnoseRecommend, 5)
+		if err != nil {
+			return err
+		}
+		for _, t := range tracks {
+			fmt.Printf("rec: %-24s %s — %v\n", t.ID, t.Name, t.Artists)
+		}
+		return nil
 	}
 
 	if cfg.Once {
@@ -152,7 +196,7 @@ func runDiagnoseSearch(client *spotifyapi.Client, query string) error {
 }
 
 func runDiagnosePlaylistTracks(client *spotifyapi.Client, playlistID string) error {
-	tracks, err := client.GetPlaylistTracks(playlistID, 100)
+	tracks, err := client.GetPlaylistTracks(playlistID)
 	if err != nil {
 		return err
 	}
@@ -168,6 +212,28 @@ func runDiagnoseArt(imageURL string, useKitty bool) error {
 		return err
 	}
 	fmt.Println(art)
+	return nil
+}
+
+func runDiagnoseQueue(client *spotifyapi.Client) error {
+	state, err := client.GetPlaybackState()
+	if err != nil {
+		return err
+	}
+	if state != nil {
+		fmt.Printf("current: %-24s %s  (repeat=%s shuffle=%v playing=%v)\n",
+			state.Item.ID, state.Item.Name, state.RepeatState, state.ShuffleState, state.IsPlaying)
+		fmt.Printf("context: %s  device: %s\n", state.ContextURI, state.Device.Name)
+	} else {
+		fmt.Println("current: (nothing playing)")
+	}
+	queue, err := client.GetQueue()
+	if err != nil {
+		return err
+	}
+	for i, t := range queue {
+		fmt.Printf("queue %2d: %-24s %s\n", i, t.ID, t.Name)
+	}
 	return nil
 }
 

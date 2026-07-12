@@ -81,9 +81,16 @@ type rawPlaylistTracksResponse struct {
 	} `json:"items"`
 }
 
-// GetPlaylistTracks fetches the first page of GET /playlists/<id>/items
-// (Spotify max limit=100). Entries with a null track (local files, removed
-// tracks) are skipped rather than surfaced as zero-value Tracks.
+const (
+	playlistTracksPageLimit = 100  // Spotify's max per request on this endpoint
+	playlistTracksCap       = 1000 // safety cap: at most 10 sequential page fetches
+)
+
+// GetPlaylistTracks fetches GET /playlists/<id>/items, following offset
+// pagination until the playlist is exhausted (or playlistTracksCap, so a
+// huge playlist can't stall the UI behind dozens of sequential requests).
+// Entries with a null track (local files, removed tracks) are skipped
+// rather than surfaced as zero-value Tracks.
 //
 // NOTE: this endpoint used to be /playlists/<id>/tracks — Spotify's
 // February 2026 Web API migration renamed it to /items (confirmed via curl:
@@ -93,32 +100,39 @@ type rawPlaylistTracksResponse struct {
 // or collaborate on — Spotify-owned/algorithmic and other users' public
 // playlists will 403/404 regardless of endpoint. Own-playlists-only is a
 // real, documented limitation, not a bug to chase further here.
-func (c *Client) GetPlaylistTracks(playlistID string, limit int) ([]Track, error) {
-	q := url.Values{"limit": {fmt.Sprint(limit)}}
-	resp, err := c.do(http.MethodGet, "/playlists/"+playlistID+"/items?"+q.Encode(), nil, "")
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-	if err := classifyStatus(resp, data); err != nil {
-		return nil, err
-	}
-
-	var raw rawPlaylistTracksResponse
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return nil, fmt.Errorf("parse playlist tracks: %w", err)
-	}
-	tracks := make([]Track, 0, len(raw.Items))
-	for _, entry := range raw.Items {
-		if entry.Item == nil {
-			continue
+func (c *Client) GetPlaylistTracks(playlistID string) ([]Track, error) {
+	var tracks []Track
+	for offset := 0; offset < playlistTracksCap; offset += playlistTracksPageLimit {
+		q := url.Values{
+			"limit":  {fmt.Sprint(playlistTracksPageLimit)},
+			"offset": {fmt.Sprint(offset)},
 		}
-		tracks = append(tracks, entry.Item.toTrack())
+		resp, err := c.do(http.MethodGet, "/playlists/"+playlistID+"/items?"+q.Encode(), nil, "")
+		if err != nil {
+			return nil, err
+		}
+		data, err := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if err != nil {
+			return nil, err
+		}
+		if err := classifyStatus(resp, data); err != nil {
+			return nil, err
+		}
+
+		var raw rawPlaylistTracksResponse
+		if err := json.Unmarshal(data, &raw); err != nil {
+			return nil, fmt.Errorf("parse playlist tracks: %w", err)
+		}
+		for _, entry := range raw.Items {
+			if entry.Item == nil {
+				continue
+			}
+			tracks = append(tracks, entry.Item.toTrack())
+		}
+		if len(raw.Items) < playlistTracksPageLimit {
+			break // last page
+		}
 	}
 	return tracks, nil
 }

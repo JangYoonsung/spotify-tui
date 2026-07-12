@@ -18,10 +18,15 @@ func (m Model) View() string {
 		b.WriteString(renderSearchScreen(m, width))
 	case screenDevices:
 		b.WriteString(renderDevicesScreen(m, width))
+	case screenQueue:
+		b.WriteString(renderQueueScreen(m, width))
+	case screenRecent:
+		b.WriteString(renderRecentScreen(m, width))
 	default:
-		b.WriteString(renderWidget(interpolatedState(m.state, m.lastRefresh, time.Now()), m.artRendered, m.cfg.ExperimentalKittyArt, width, m.marqueeTick))
+		liked := m.likedCurrent && m.state != nil && m.likedForID == m.state.Item.ID
+		b.WriteString(renderWidget(interpolatedState(m.state, m.lastRefresh, time.Now()), m.artRendered, m.nextTrack, liked, m.cfg.ExperimentalKittyArt, width, m.marqueeTick))
 		b.WriteString("\n")
-		b.WriteString(renderPlaylistsBox(m.playlists, width, m.spin.View()))
+		b.WriteString(renderPlaylistsBox(m.playlists, width, m.spin.View(), !m.focusTracks))
 		if m.playlistTracksTitle != "" {
 			b.WriteString("\n")
 			b.WriteString(renderPlaylistTracksBox(m, width))

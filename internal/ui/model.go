@@ -26,6 +26,8 @@ type Model struct {
 	searchInput textinput.Model
 	playlists   listState
 	devices     listState
+	queueList   listState
+	recentList  listState
 	// spin animates the "loading…" rows. Its ticker is gated: armed whenever
 	// a fetch flips some listState.loading on, and dropped (not re-armed) by
 	// spinner.TickMsg once nothing is loading anymore.
@@ -57,6 +59,23 @@ type Model struct {
 
 	artTrackID  string
 	artRendered string
+	// nextTrack is the "up next" label from GET /me/player/queue — fetched
+	// on track change and after control actions, cleared while unknown.
+	nextTrack string
+	// likedCurrent/likedForID: whether the CURRENT track is in Liked Songs
+	// — checked once per track change, toggled optimistically by the l key.
+	likedCurrent bool
+	likedForID   string
+
+	// autoplaySeededFor marks the track a similar-tracks queue seed was
+	// already attempted for, so the seed fires once per track, not on every
+	// queue refetch.
+	autoplaySeededFor string
+	// lastContextURI tracks what playback is playing FROM — when it changes
+	// to a playlist this box isn't showing (e.g. playback started from the
+	// phone), the tracks box follows it. Only on the change edge, so the
+	// user's own browsing isn't overridden every poll.
+	lastContextURI string
 
 	// marqueeTick drives the ping-pong scroll for a track title too long
 	// to fit — advanced by its own fast ticker (marqueeTickCmd), decoupled
@@ -92,6 +111,8 @@ func New(client *spotifyapi.Client, cfg config.Config) Model {
 		playlistTracks: newListState(),
 		search:         newListState(),
 		devices:        newListState(),
+		queueList:      newListState(),
+		recentList:     newListState(),
 	}
 
 	if st := config.LoadUIState(); st.LastPlaylistID != "" {

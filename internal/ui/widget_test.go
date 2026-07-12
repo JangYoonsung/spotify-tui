@@ -33,7 +33,7 @@ func TestNowPlayingLinesNoArt(t *testing.T) {
 		ProgressMs: 50000,
 		Device:     spotifyapi.Device{Name: "Dev", VolumePercent: 50},
 	}
-	lines := nowPlayingLines(s, "", 56, 0)
+	lines := nowPlayingLines(s, "", "", false, 56, 0)
 	if len(lines) != 3 {
 		t.Fatalf("got %d lines, want 3 (no art -> track/progress/status only)", len(lines))
 	}
@@ -41,6 +41,15 @@ func TestNowPlayingLinesNoArt(t *testing.T) {
 		if strings.Contains(l, "\n") {
 			t.Fatalf("line contains embedded newline, would break boxRow: %q", l)
 		}
+	}
+
+	// With a known next track, an extra "up next" line appears.
+	lines = nowPlayingLines(s, "", "Next Song — Next Artist", false, 56, 0)
+	if len(lines) != 4 {
+		t.Fatalf("got %d lines, want 4 (track/progress/status/next)", len(lines))
+	}
+	if !strings.Contains(lines[3], "Next Song") {
+		t.Fatalf("next line missing track: %q", lines[3])
 	}
 }
 
@@ -50,7 +59,7 @@ func TestNowPlayingLinesWithArt(t *testing.T) {
 		ProgressMs: 0,
 	}
 	art := strings.Join([]string{"AAAA", "BBBB", "CCCC", "DDDD"}, "\n")
-	lines := nowPlayingLines(s, art, 56, 0)
+	lines := nowPlayingLines(s, art, "", false, 56, 0)
 	if len(lines) != 4 {
 		t.Fatalf("got %d lines, want 4 (matches art row count)", len(lines))
 	}
@@ -78,7 +87,7 @@ func TestNowPlayingLinesWithArtColumnWidth(t *testing.T) {
 	artLine := strings.Repeat("█", artCols)
 	art := strings.Join([]string{artLine, artLine, artLine, artLine, artLine, artLine}, "\n")
 	width := 56
-	lines := nowPlayingLines(s, art, width, 0)
+	lines := nowPlayingLines(s, art, "", false, width, 0)
 	for _, l := range lines {
 		if w := lipgloss.Width(l); w > width-4 {
 			t.Fatalf("line exceeds boxRow inner width (%d): width=%d line=%q", width-4, w, l)
@@ -134,14 +143,14 @@ func TestWindowByWidth(t *testing.T) {
 
 func TestBoxRowNeverExceedsWidth(t *testing.T) {
 	long := strings.Repeat("x", 200)
-	row := boxRow(long, 40)
+	row := boxRow(long, 40, false)
 	if w := lipgloss.Width(row); w != 40 {
 		t.Fatalf("boxRow width = %d, want 40 (long content should be truncated to fit)", w)
 	}
 }
 
 func TestBoxRowPadsShortContent(t *testing.T) {
-	row := boxRow("hi", 40)
+	row := boxRow("hi", 40, true)
 	if w := lipgloss.Width(row); w != 40 {
 		t.Fatalf("boxRow width = %d, want 40 (short content should be padded)", w)
 	}

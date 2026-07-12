@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jangyoonsung/spotify-tui-go/internal/spotifyapi"
 )
@@ -53,7 +54,7 @@ const defaultWidgetWidth = 56
 //     raw art string is emitted once, completely untouched, as its own
 //     paragraph before the boxed widget — the widget itself renders without
 //     an art column in this mode.
-func renderWidget(state *spotifyapi.PlaybackState, art string, artIsGraphics bool, width, marqueeTick int) string {
+func renderWidget(state *spotifyapi.PlaybackState, art, nextTrack string, liked, artIsGraphics bool, width, marqueeTick int) string {
 	if width <= 0 {
 		width = defaultWidgetWidth
 	}
@@ -94,7 +95,7 @@ func renderWidget(state *spotifyapi.PlaybackState, art string, artIsGraphics boo
 		if artIsGraphics {
 			inlineArt = "" // already emitted above, unsplit
 		}
-		for _, line := range nowPlayingLines(*state, inlineArt, width, marqueeTick) {
+		for _, line := range nowPlayingLines(*state, inlineArt, nextTrack, liked, width, marqueeTick) {
 			b.WriteString(boxRowPrimary(line, width))
 			b.WriteString("\n")
 		}
@@ -104,7 +105,7 @@ func renderWidget(state *spotifyapi.PlaybackState, art string, artIsGraphics boo
 	return b.String()
 }
 
-func nowPlayingLines(s spotifyapi.PlaybackState, art string, width, marqueeTick int) []string {
+func nowPlayingLines(s spotifyapi.PlaybackState, art, nextTrack string, liked bool, width, marqueeTick int) []string {
 	// boxRow reserves 4 columns for its own "│ " + " │" border/padding —
 	// content sized off the full box width (rather than that minus 4)
 	// overflows boxRow's actual inner width and gets truncated with "…".
@@ -117,18 +118,30 @@ func nowPlayingLines(s spotifyapi.PlaybackState, art string, width, marqueeTick 
 	if textWidth < 20 {
 		textWidth = 20
 	}
-	text := strings.Join([]string{trackLine(s, textWidth, marqueeTick), progressLine(s, textWidth), statusLine(s), ""}, "\n")
-	if art == "" {
-		return strings.Split(text, "\n")[:3]
+	textLines := []string{trackLine(s, liked, textWidth, marqueeTick), progressLine(s, textWidth), statusLine(s)}
+	if nextTrack != "" {
+		textLines = append(textLines, nextLine(nextTrack, textWidth))
 	}
+	if art == "" {
+		return textLines
+	}
+	text := strings.Join(append(textLines, ""), "\n")
 	joined := lipgloss.JoinHorizontal(lipgloss.Top, art, "  ", text)
 	return strings.Split(joined, "\n")
 }
 
-func trackLine(s spotifyapi.PlaybackState, width, marqueeTick int) string {
+// nextLine shows what plays after the current track (from the queue).
+func nextLine(nextTrack string, width int) string {
+	return dimStyle.Render(ansi.Truncate("↳ next  "+nextTrack, width, "…"))
+}
+
+func trackLine(s spotifyapi.PlaybackState, liked bool, width, marqueeTick int) string {
 	icon := pauseStyle.Render("⏸")
 	if s.IsPlaying {
 		icon = playStyle.Render("▶")
+	}
+	if liked {
+		icon += " " + accentStyle.Render("♥")
 	}
 	if s.Item.Name == "" {
 		return icon + "  " + dimStyle.Render("(no track)")

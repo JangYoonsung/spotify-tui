@@ -37,6 +37,75 @@ func (c *Client) GetPlaybackState() (*PlaybackState, error) {
 	return &ps, nil
 }
 
+// GetQueue fetches GET /me/player/queue and returns the upcoming tracks
+// (first entry = the next track). Entries that aren't tracks (podcast
+// episodes lack an id) still unmarshal into rawTrack well enough for a
+// display label, which is all callers use this for.
+func (c *Client) GetQueue() ([]Track, error) {
+	resp, err := c.do(http.MethodGet, "/me/player/queue", nil, "")
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if err := classifyStatus(resp, data); err != nil {
+		return nil, err
+	}
+
+	var raw struct {
+		Queue []rawTrack `json:"queue"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, fmt.Errorf("parse queue: %w", err)
+	}
+	tracks := make([]Track, 0, len(raw.Queue))
+	for _, t := range raw.Queue {
+		tracks = append(tracks, t.toTrack())
+	}
+	return tracks, nil
+}
+
+// GetRecentlyPlayed fetches GET /me/player/recently-played (needs the
+// user-read-recently-played scope — probe with --diagnose-recent before
+// relying on it; the cached token may predate the scope being requested).
+func (c *Client) GetRecentlyPlayed(limit int) ([]Track, error) {
+	q := url.Values{"limit": {fmt.Sprint(limit)}}
+	resp, err := c.do(http.MethodGet, "/me/player/recently-played?"+q.Encode(), nil, "")
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if err := classifyStatus(resp, data); err != nil {
+		return nil, err
+	}
+
+	var raw struct {
+		Items []struct {
+			Track *rawTrack `json:"track"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, fmt.Errorf("parse recently played: %w", err)
+	}
+	tracks := make([]Track, 0, len(raw.Items))
+	for _, it := range raw.Items {
+		if it.Track == nil {
+			continue
+		}
+		tracks = append(tracks, it.Track.toTrack())
+	}
+	return tracks, nil
+}
+
 // GetDevices fetches GET /me/player/devices.
 func (c *Client) GetDevices() ([]Device, error) {
 	resp, err := c.do(http.MethodGet, "/me/player/devices", nil, "")
@@ -147,6 +216,22 @@ func (c *Client) playWithDeviceAndBody(deviceID string, body []byte) error {
 // PUT /me/player/play?device_id=<id>, body {"context_uri": "<uri>"}.
 func (c *Client) PlayContext(deviceID, contextURI string) error {
 	body, _ := json.Marshal(map[string]string{"context_uri": contextURI})
+	return c.playWithDeviceAndBody(deviceID, body)
+}
+
+// PlayContextAt starts contextURI positioned at trackURI:
+// PUT /me/player/play?device_id=<id>, body {"context_uri": ..., "offset":
+// {"uri": ...}}. Unlike PlayURIs with a single track, playback continues
+// through the rest of the context afterwards — and the queue endpoint
+// returns the real upcoming tracks instead of the same track repeated
+// (Spotify fills the queue with the current track when playing a bare
+// single-URI "context", even with repeat off — confirmed via
+// --diagnose-queue).
+func (c *Client) PlayContextAt(deviceID, contextURI, trackURI string) error {
+	body, _ := json.Marshal(map[string]any{
+		"context_uri": contextURI,
+		"offset":      map[string]string{"uri": trackURI},
+	})
 	return c.playWithDeviceAndBody(deviceID, body)
 }
 

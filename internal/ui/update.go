@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/key"
@@ -59,6 +60,42 @@ type devicesResultMsg struct {
 	err     error
 }
 
+// queueResultMsg carries the upcoming queue, tagged with the track it was
+// fetched for so a stale response can't label the wrong "next" (same
+// pattern as artResultMsg).
+type queueResultMsg struct {
+	forTrackID string
+	tracks     []spotifyapi.Track
+	err        error
+}
+
+// queueViewResultMsg is the same fetch feeding the queue *screen* (u) —
+// separate from queueResultMsg so browsing the queue can't clobber the
+// widget's "next" label and vice versa.
+type queueViewResultMsg struct {
+	tracks []spotifyapi.Track
+	err    error
+}
+
+type recentResultMsg struct {
+	tracks []spotifyapi.Track
+	err    error
+}
+
+// likedResultMsg reports whether the current track is in Liked Songs.
+type likedResultMsg struct {
+	forTrackID string
+	liked      bool
+	err        error
+}
+
+// likedPlaylistID is the virtual "playlist" id for the Liked Songs row at
+// the top of the playlists box — routed to GET /me/tracks instead of a real
+// playlist endpoint everywhere a playlist id is consumed.
+const likedPlaylistID = "__liked__"
+
+const likedPlaylistLabel = "♥ Liked Songs"
+
 const (
 	artCols = 12
 	artRows = 6
@@ -92,8 +129,19 @@ func playlistsCmd(client *spotifyapi.Client) tea.Cmd {
 
 func playlistTracksCmd(client *spotifyapi.Client, playlistID string) tea.Cmd {
 	return func() tea.Msg {
-		tracks, err := client.GetPlaylistTracks(playlistID, 100)
+		if playlistID == likedPlaylistID {
+			tracks, err := client.GetSavedTracks()
+			return playlistTracksResultMsg{tracks: tracks, err: err}
+		}
+		tracks, err := client.GetPlaylistTracks(playlistID)
 		return playlistTracksResultMsg{tracks: tracks, err: err}
+	}
+}
+
+func checkLikedCmd(client *spotifyapi.Client, trackID string) tea.Cmd {
+	return func() tea.Msg {
+		liked, err := client.CheckSavedTrack(trackID)
+		return likedResultMsg{forTrackID: trackID, liked: liked, err: err}
 	}
 }
 
@@ -109,6 +157,42 @@ func devicesCmd(client *spotifyapi.Client) tea.Cmd {
 		devices, err := client.GetDevices()
 		return devicesResultMsg{devices: devices, err: err}
 	}
+}
+
+func queueCmd(client *spotifyapi.Client, forTrackID string) tea.Cmd {
+	return func() tea.Msg {
+		tracks, err := client.GetQueue()
+		return queueResultMsg{forTrackID: forTrackID, tracks: tracks, err: err}
+	}
+}
+
+func queueViewCmd(client *spotifyapi.Client) tea.Cmd {
+	return func() tea.Msg {
+		tracks, err := client.GetQueue()
+		return queueViewResultMsg{tracks: tracks, err: err}
+	}
+}
+
+func recentCmd(client *spotifyapi.Client) tea.Cmd {
+	return func() tea.Msg {
+		tracks, err := client.GetRecentlyPlayed(50)
+		return recentResultMsg{tracks: tracks, err: err}
+	}
+}
+
+// dedupTracks collapses repeated track IDs to their first (most recent)
+// occurrence — Spotify's recently-played reports every replay separately.
+func dedupTracks(tracks []spotifyapi.Track) []spotifyapi.Track {
+	seen := make(map[string]bool, len(tracks))
+	out := make([]spotifyapi.Track, 0, len(tracks))
+	for _, t := range tracks {
+		if seen[t.ID] {
+			continue
+		}
+		seen[t.ID] = true
+		out = append(out, t)
+	}
+	return out
 }
 
 func artCmd(imageURL, trackID string, useKitty bool) tea.Cmd {
@@ -162,8 +246,36 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.state != nil && (m.state == nil || msg.state.Item.ID != m.state.Item.ID) {
 			m.marqueeTick = 0
 		}
+		prev := m.state
 		m.state = msg.state
+		// Follow the playback context: if what's playing switched to a
+		// playlist this box isn't already showing (started from the phone,
+		// autoplay chain, another client…), load its tracks. Edge-triggered
+		// on the context URI so the user's own browsing isn't overridden.
+		if msg.state != nil && msg.state.ContextURI != m.lastContextURI {
+			m.lastContextURI = msg.state.ContextURI
+			if id, ok := strings.CutPrefix(msg.state.ContextURI, "spotify:playlist:"); ok && id != m.currentPlaylistID {
+				m.currentPlaylistID = id
+				m.playlistTracksTitle = m.playlistNameByID(id)
+				m.playlistTracks = loadingListState()
+				return m, tea.Batch(playlistTracksCmd(m.client, id), m.spin.Tick)
+			}
+		}
+		// Playlist/queue ran out mid-listen: chain into similar tracks, like
+		// the official clients' autoplay. Search-based because Spotify
+		// removed GET /recommendations for development-mode apps (probed:
+		// 404 with valid auth and an active device).
+		if !m.actionInFlight && m.nextTrack == "" &&
+			playbackEnded(prev, msg.state, 2*int(m.cfg.PollInterval.Milliseconds())) {
+			m.actionInFlight = true
+			return m, m.autoplaySimilarCmd(prev.Item)
+		}
 		if msg.state != nil && msg.state.Item.ID != "" && msg.state.Item.ID != m.artTrackID {
+			// Track changed: clear the stale "next" label and refetch the
+			// queue for the new track (not every poll — one extra call per
+			// track change, not per 3s tick).
+			m.nextTrack = ""
+			cmds := []tea.Cmd{queueCmd(m.client, msg.state.Item.ID), checkLikedCmd(m.client, msg.state.Item.ID)}
 			imageURL := albumart.PickImageURL(msg.state.Item.Images, artCols*8, artRows*2*8)
 			if imageURL != "" {
 				// Record artTrackID now, before the fetch resolves — the
@@ -174,9 +286,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// haven't fetched art yet" and fired a duplicate artCmd for
 				// the same track.
 				m.artTrackID = msg.state.Item.ID
-				return m, artCmd(imageURL, msg.state.Item.ID, m.cfg.ExperimentalKittyArt)
+				cmds = append(cmds, artCmd(imageURL, msg.state.Item.ID, m.cfg.ExperimentalKittyArt))
+			} else {
+				m.artTrackID, m.artRendered = msg.state.Item.ID, ""
 			}
-			m.artTrackID, m.artRendered = msg.state.Item.ID, ""
+			return m, tea.Batch(cmds...)
 		}
 		return m, nil
 
@@ -199,7 +313,84 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.lastErr = msg.err
 			return m, nil
 		}
-		return m, refreshCmd(m.client)
+		// Refetch the queue too: actions like queue-add change what's next
+		// without changing the current track, so the track-change trigger
+		// in refreshResultMsg never fires for them.
+		cmds := []tea.Cmd{refreshCmd(m.client)}
+		if m.state != nil && m.state.Item.ID != "" {
+			cmds = append(cmds, queueCmd(m.client, m.state.Item.ID))
+		}
+		return m, tea.Batch(cmds...)
+
+	case queueResultMsg:
+		// Silent on error — "next" is a garnish, not worth an error banner.
+		if msg.err == nil && m.state != nil && m.state.Item.ID == msg.forTrackID {
+			m.nextTrack = ""
+			// The queue endpoint lies in several confirmed ways (single-URI
+			// playback pads it with the current track; a playlist's last
+			// track reports a wrap-around to the first; librespot devices
+			// report a queue that differs from what they actually play
+			// next, verified by skipping). When the current track sits in
+			// the playing context's track list (which the tracks box
+			// follows), the LIST ORDER is the trustworthy "next" — the
+			// queue is only a fallback for out-of-context playback
+			// (autoplay chains, single tracks). Shuffle randomizes order,
+			// so position means nothing there; repeat-one's real "next" is
+			// itself.
+			ctxID, hasCtx := strings.CutPrefix(m.state.ContextURI, "spotify:playlist:")
+			contextOrdered := false
+			// repeat=off only: with repeat=context the wrap to the first
+			// track is real and the queue reports it correctly.
+			if m.state.RepeatState == "off" && !m.state.ShuffleState && hasCtx && ctxID == m.currentPlaylistID {
+				items := m.playlistTracks.list.Items()
+				for i, it := range items {
+					li, ok := it.(listItem)
+					if !ok || li.id != msg.forTrackID {
+						continue
+					}
+					contextOrdered = true
+					if i+1 < len(items) {
+						if nxt, ok := items[i+1].(listItem); ok {
+							m.nextTrack = nxt.label
+						}
+					}
+					// Last list entry: leave nextTrack empty — the queue's
+					// wrap-around claim is fake, and empty is what lets the
+					// autoplay seed fire below.
+					break
+				}
+			}
+			if !contextOrdered {
+				for _, t := range msg.tracks {
+					if t.ID != msg.forTrackID {
+						m.nextTrack = trackLabel(t)
+						break
+					}
+				}
+				if m.nextTrack == "" && len(msg.tracks) > 0 && m.state.RepeatState == "track" {
+					m.nextTrack = trackLabel(msg.tracks[0])
+				}
+			}
+			// Queue genuinely empty while still playing: seed similar
+			// tracks into the real queue now, so playback rolls straight
+			// into them (and they show up as "next" / on the queue screen).
+			// Once per track — a failed seed leaves the playbackEnded
+			// backup path to catch the stop.
+			if m.nextTrack == "" && m.state.IsPlaying &&
+				m.state.RepeatState != "track" && m.autoplaySeededFor != m.state.Item.ID {
+				m.autoplaySeededFor = m.state.Item.ID
+				return m, m.seedAutoplayCmd(m.state.Item)
+			}
+		}
+		return m, nil
+
+	case autoplaySeedResultMsg:
+		// Success: refetch the queue so the seeded tracks appear as "next".
+		// Failure is silent — the playbackEnded backup still fires.
+		if msg.err == nil && m.state != nil && m.state.Item.ID == msg.forTrackID {
+			return m, queueCmd(m.client, msg.forTrackID)
+		}
+		return m, nil
 
 	case playlistsResultMsg:
 		m.playlists.loading = false
@@ -220,7 +411,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// the previous run, if any.
 				prevID = m.restorePlaylistID
 			}
-			m.playlists.setItems(playlistItems(msg.playlists))
+			items := append(
+				[]list.Item{listItem{label: likedPlaylistLabel, id: likedPlaylistID}},
+				playlistItems(msg.playlists)...,
+			)
+			m.playlists.setItems(items)
 			m.playlists.selectID(prevID)
 		}
 		return m, nil
@@ -253,6 +448,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case queueViewResultMsg:
+		m.queueList.loading = false
+		m.queueList.err = msg.err
+		if msg.err == nil {
+			m.queueList.setItems(trackItems(msg.tracks))
+		}
+		return m, nil
+
+	case recentResultMsg:
+		m.recentList.loading = false
+		m.recentList.err = msg.err
+		if msg.err == nil {
+			m.recentList.setItems(trackItems(dedupTracks(msg.tracks)))
+		}
+		return m, nil
+
+	case likedResultMsg:
+		// Silent on error — the heart is decoration, like the next label.
+		if msg.err == nil && m.state != nil && m.state.Item.ID == msg.forTrackID {
+			m.likedCurrent = msg.liked
+			m.likedForID = msg.forTrackID
+		}
+		return m, nil
+
 	case list.FilterMatchesMsg:
 		// bubbles/list computes fuzzy-filter matches asynchronously: typing
 		// returns a cmd whose FilterMatchesMsg must be fed back into the
@@ -280,6 +499,10 @@ func (m *Model) activeList() *listState {
 		return &m.search
 	case screenDevices:
 		return &m.devices
+	case screenQueue:
+		return &m.queueList
+	case screenRecent:
+		return &m.recentList
 	default:
 		if m.focusTracks {
 			return &m.playlistTracks
@@ -328,6 +551,14 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.screen = screenDevices
 		m.devices = loadingListState()
 		return m, tea.Batch(devicesCmd(m.client), m.spin.Tick)
+	case key.Matches(msg, keys.Queue) && m.screen == screenNowPlaying:
+		m.screen = screenQueue
+		m.queueList = loadingListState()
+		return m, tea.Batch(queueViewCmd(m.client), m.spin.Tick)
+	case key.Matches(msg, keys.Recent) && m.screen == screenNowPlaying:
+		m.screen = screenRecent
+		m.recentList = loadingListState()
+		return m, tea.Batch(recentCmd(m.client), m.spin.Tick)
 	case key.Matches(msg, keys.Refresh):
 		return m, tea.Batch(refreshCmd(m.client), playlistsCmd(m.client))
 	case key.Matches(msg, keys.Help):
@@ -337,9 +568,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	switch m.screen {
 	case screenSearch:
-		return m.handleListKey(&m.search, msg, m.playTrackSelection)
+		return m.handleListKey(msg, m.playTrackSelection)
 	case screenDevices:
-		return m.handleListKey(&m.devices, msg, m.transferToDevice)
+		return m.handleListKey(msg, m.transferToDevice)
+	case screenQueue, screenRecent:
+		return m.handleListKey(msg, m.playTrackSelection)
 	default:
 		return m.handleNowPlayingKey(msg)
 	}
@@ -369,7 +602,7 @@ func (m Model) handleNowPlayingKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				LastPlaylistName: m.playlistTracksTitle,
 				LastTrackID:      item.id,
 			})
-			return m, m.playTrackSelection(item)
+			return m, m.playPlaylistTrackSelection(item)
 		case key.Matches(msg, keys.QueueAdd):
 			item, ok := m.playlistTracks.selected()
 			if !ok {
@@ -445,10 +678,17 @@ func (m Model) handleSearchTypingKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-// handleListKey drives selection for the Search/Devices screens: enter and
-// queue-add are this app's actions, everything else (cursor movement,
-// paging, "f" fuzzy filter) is delegated to bubbles/list.
-func (m Model) handleListKey(l *listState, msg tea.KeyMsg, play func(listItem) tea.Cmd) (tea.Model, tea.Cmd) {
+// handleListKey drives selection for the Search/Devices/Queue screens:
+// enter and queue-add are this app's actions, everything else (cursor
+// movement, paging, "f" fuzzy filter) is delegated to bubbles/list.
+//
+// The list is resolved from THIS receiver via activeList — Model has value
+// semantics, so accepting a *listState from the caller silently discards
+// every list.Update: the pointer aims at the caller's copy while the method
+// returns its own. That exact bug shipped once (queue/search/devices
+// cursors frozen); see TestQueueScreenCursorMoves.
+func (m Model) handleListKey(msg tea.KeyMsg, play func(listItem) tea.Cmd) (tea.Model, tea.Cmd) {
+	l := m.activeList()
 	switch {
 	case key.Matches(msg, keys.Search) && m.screen == screenSearch:
 		m.searchInput.Reset()
@@ -505,6 +745,116 @@ func (m Model) transferToDevice(item listItem) tea.Cmd {
 	})
 }
 
+// playbackEnded reports whether playback ran off the end of its material
+// between two polls — previous poll: playing and within nearEndMs of the
+// track's end; this poll: stopped at position 0 (or gone idle). A user
+// pausing mid-track fails the near-end check, so it doesn't trigger this.
+func playbackEnded(prev, cur *spotifyapi.PlaybackState, nearEndMs int) bool {
+	if prev == nil || !prev.IsPlaying || prev.Item.DurationMs == 0 {
+		return false
+	}
+	if prev.Item.DurationMs-prev.ProgressMs > nearEndMs {
+		return false
+	}
+	if cur == nil {
+		return true
+	}
+	// Spotify reports "stopped at the end" as either position 0 or parked at
+	// the track's full duration, depending on device — accept both.
+	return !cur.IsPlaying && (cur.ProgressMs == 0 || cur.ProgressMs >= cur.Item.DurationMs)
+}
+
+// autoplayExcludes is what similar-track picks must avoid: the reference
+// track itself plus everything in the open playlist (chaining back into
+// what was just listened to isn't "similar", it's a rerun).
+func (m Model) autoplayExcludes(last spotifyapi.Track) map[string]bool {
+	exclude := map[string]bool{last.ID: true}
+	for _, it := range m.playlistTracks.list.Items() {
+		if li, ok := it.(listItem); ok {
+			exclude[li.id] = true
+		}
+	}
+	return exclude
+}
+
+// similarTrackURIs assembles up to n track URIs "similar" to the query
+// artist: artist search first, the user's own top tracks as filler. The
+// endpoints that would do this properly are dead for development-mode apps
+// (GET /recommendations 404s, /artists/{id}/top-tracks 403s — both probed).
+func similarTrackURIs(client *spotifyapi.Client, query string, exclude map[string]bool, n int) []string {
+	var uris []string
+	add := func(tracks []spotifyapi.Track) {
+		for _, t := range tracks {
+			if len(uris) >= n || exclude[t.ID] {
+				continue
+			}
+			exclude[t.ID] = true
+			uris = append(uris, "spotify:track:"+t.ID)
+		}
+	}
+	if results, err := client.SearchTracks(query, 10); err == nil {
+		add(results.Tracks)
+	}
+	if len(uris) < n {
+		if top, err := client.GetMyTopTracks(20); err == nil {
+			add(top)
+		}
+	}
+	return uris
+}
+
+// autoplaySimilarCmd starts similar-tracks playback outright — the backup
+// path for when playback already stopped (the queue seed either wasn't
+// possible or didn't land in time).
+func (m Model) autoplaySimilarCmd(last spotifyapi.Track) tea.Cmd {
+	client := m.client
+	exclude := m.autoplayExcludes(last)
+	query := last.Name
+	if len(last.Artists) > 0 {
+		query = last.Artists[0]
+	}
+	return m.resolveDeviceAndRun(func(deviceID string) error {
+		uris := similarTrackURIs(client, query, exclude, 10)
+		if len(uris) == 0 {
+			return fmt.Errorf("autoplay: no similar tracks found for %q", query)
+		}
+		return client.PlayURIs(deviceID, uris)
+	})
+}
+
+// autoplaySeedResultMsg reports the queue-seeding attempt (below).
+type autoplaySeedResultMsg struct {
+	forTrackID string
+	err        error
+}
+
+// seedAutoplayCmd is the primary autoplay path: while the LAST queued track
+// is still playing, push similar tracks into the real Spotify queue
+// (AddToQueue) — playback then continues seamlessly without this widget
+// having to detect the stop, and the "next" label and queue screen show the
+// seeded tracks like any other queue content.
+func (m Model) seedAutoplayCmd(last spotifyapi.Track) tea.Cmd {
+	client := m.client
+	exclude := m.autoplayExcludes(last)
+	query := last.Name
+	if len(last.Artists) > 0 {
+		query = last.Artists[0]
+	}
+	forID := last.ID
+	return func() tea.Msg {
+		uris := similarTrackURIs(client, query, exclude, 2)
+		if len(uris) == 0 {
+			return autoplaySeedResultMsg{forTrackID: forID, err: fmt.Errorf("no similar tracks for %q", query)}
+		}
+		for _, u := range uris {
+			if err := client.AddToQueue(u); err != nil {
+				return autoplaySeedResultMsg{forTrackID: forID, err: err}
+			}
+		}
+		return autoplaySeedResultMsg{forTrackID: forID}
+	}
+}
+
 // resolveDeviceAndRun wraps run with device resolution: prefer the device
 // from the last-known playback state, else pick the active (or first)
 // device from GetDevices — playback-start endpoints all need a target when
@@ -550,9 +900,29 @@ func (m Model) playTrackSelection(item listItem) tea.Cmd {
 	})
 }
 
+// playPlaylistTrackSelection plays a track *in its playlist context*
+// (PlayContextAt) so playback continues into the following tracks — a bare
+// single-URI play stops after the track and reports a bogus queue. Falls
+// back to single-URI play if the playlist ID is somehow unknown.
+func (m Model) playPlaylistTrackSelection(item listItem) tea.Cmd {
+	playlistID := m.currentPlaylistID
+	trackURI := item.trackURI
+	client := m.client
+	return m.resolveDeviceAndRun(func(deviceID string) error {
+		if trackURI == "" {
+			return fmt.Errorf("selected item has no track URI")
+		}
+		if playlistID == "" {
+			return client.PlayURIs(deviceID, []string{trackURI})
+		}
+		return client.PlayContextAt(deviceID, "spotify:playlist:"+playlistID, trackURI)
+	})
+}
+
 // playContextSelection starts the whole playlist as the playback context,
 // so track-to-track continuation works — unlike playTrackSelection, which
-// plays a single URI with no next-track context.
+// plays a single URI with no next-track context. Liked Songs has no
+// playable context URI for third-party apps, so it plays as a URI batch.
 func (m Model) playContextSelection(item listItem) tea.Cmd {
 	playlistID := item.id
 	client := m.client
@@ -560,19 +930,49 @@ func (m Model) playContextSelection(item listItem) tea.Cmd {
 		if playlistID == "" {
 			return fmt.Errorf("selected item has no playlist ID")
 		}
+		if playlistID == likedPlaylistID {
+			tracks, err := client.GetSavedTracks()
+			if err != nil {
+				return err
+			}
+			if len(tracks) == 0 {
+				return fmt.Errorf("no liked songs to play")
+			}
+			uris := make([]string, 0, len(tracks))
+			for _, t := range tracks {
+				uris = append(uris, "spotify:track:"+t.ID)
+			}
+			return client.PlayURIs(deviceID, uris)
+		}
 		return client.PlayContext(deviceID, "spotify:playlist:"+playlistID)
 	})
+}
+
+// playlistNameByID resolves a playlist's display name from the loaded
+// playlists list, falling back to a generic title when it isn't there
+// (another user's playlist, or the list hasn't loaded yet).
+func (m Model) playlistNameByID(id string) string {
+	for _, it := range m.playlists.list.Items() {
+		if li, ok := it.(listItem); ok && li.id == id {
+			return li.label
+		}
+	}
+	return "Now Playing"
+}
+
+func trackLabel(t spotifyapi.Track) string {
+	label := t.Name
+	if len(t.Artists) > 0 {
+		label += " — " + t.Artists[0]
+	}
+	return label
 }
 
 func trackItems(tracks []spotifyapi.Track) []list.Item {
 	items := make([]list.Item, 0, len(tracks))
 	for _, t := range tracks {
-		label := t.Name
-		if len(t.Artists) > 0 {
-			label += " — " + t.Artists[0]
-		}
 		items = append(items, listItem{
-			label:    label,
+			label:    trackLabel(t),
 			duration: formatMs(t.DurationMs),
 			id:       t.ID,
 			trackURI: "spotify:track:" + t.ID,
@@ -655,6 +1055,20 @@ func (m Model) handleControlKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		next := nextRepeatMode(m.state.RepeatState)
 		m.state.RepeatState = next
 		return m, actionCmd(func() error { return m.client.SetRepeat(next) })
+	case key.Matches(msg, keys.Like):
+		if m.state == nil || m.state.Item.ID == "" {
+			return m, nil
+		}
+		m.actionInFlight = true
+		trackID := m.state.Item.ID
+		liked := !m.likedCurrent // optimistic flip, like play/pause
+		m.likedCurrent = liked
+		m.likedForID = trackID
+		client := m.client
+		if liked {
+			return m, actionCmd(func() error { return client.SaveTrack(trackID) })
+		}
+		return m, actionCmd(func() error { return client.RemoveSavedTrack(trackID) })
 	}
 	return m, nil
 }

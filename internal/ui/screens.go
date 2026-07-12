@@ -26,6 +26,13 @@ const (
 	// there via PlayWithDeviceQuery (the confirmed-working targeting slot —
 	// see the diagnostics notes in spotifyapi/playback.go).
 	screenDevices
+	// screenQueue shows the actual upcoming play queue (GET /me/player/queue)
+	// — distinct from a playlist's track list. Enter plays the selected
+	// entry directly (single-URI play, same as picking a search result).
+	screenQueue
+	// screenRecent shows listening history (GET /me/player/recently-played,
+	// duplicates collapsed to the most recent occurrence).
+	screenRecent
 )
 
 // listItem is a pre-rendered, selectable row. Playlist rows only carry id

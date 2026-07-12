@@ -65,11 +65,14 @@ spotify-tui --experimental-kitty-art  # real Kitty/Sixel/iTerm2 image instead of
 | `s`              | toggle shuffle                                                                    |
 | `r`              | cycle repeat mode                                                                 |
 | `↑`/`k`, `↓`/`j` | move selection — playlists box by default, or the tracks box once open            |
-| `enter`          | on a playlist: open its tracks (inline, same screen). on a track: play it         |
+| `enter`          | on a playlist: open its tracks. on a track: play the playlist from that track     |
 | `P`              | play the selected playlist as a whole (track continuation) and open its tracks    |
 | `esc`            | close the open tracks box and return focus to the playlists box                   |
 | `/`              | open search (type a query, `enter` to search, then `↑↓`/`enter` to play a result) |
 | `d`              | open the device list; `enter` switches playback to the selected device            |
+| `u`              | show the actual play queue (up next); `enter` plays the selected entry            |
+| `h`              | listening history (recently played, duplicates collapsed); `enter` plays          |
+| `l`              | ♥ like / unlike the current track (shown next to the play icon)                   |
 | `a`              | in search results or a tracks list: add the selected track to the queue           |
 | `f`              | fuzzy-filter the focused list (type to narrow, `enter` accept, `esc` clear)       |
 | `?`              | toggle the expanded key help                                                      |
@@ -85,8 +88,10 @@ Controlling playback requires Spotify Premium.
 
 ## Notes
 
-- Requested OAuth scopes: `user-read-playback-state`, `user-modify-playback-state`, `user-read-currently-playing`, `playlist-read-private`, `playlist-read-collaborative`.
+- Requested OAuth scopes: `user-read-playback-state`, `user-modify-playback-state`, `user-read-currently-playing`, `playlist-read-private`, `playlist-read-collaborative`, `user-read-recently-played`, `user-top-read`, `user-library-read`, `user-library-modify`. Adding scopes doesn't upgrade a cached token — run `--login` once after updating.
 - "nothing playing" is a normal idle state (the API returns 204), not an error.
+- When the playing queue is about to run out, the widget seeds similar tracks (artist search + your top tracks) into the real queue while the last track still plays, so playback continues seamlessly — an approximation of the official clients' autoplay. Spotify removed `GET /recommendations` and `/artists/{id}/top-tracks` for development-mode apps (both probed), so the same algorithm isn't available.
+- The playlists box starts with a virtual "♥ Liked Songs" entry that opens your saved tracks like any playlist. The tracks box also follows the playback context: start a playlist from your phone and the widget loads its track list automatically.
 - Secrets never live in the repo: `.env` is gitignored and only `SPOTIFY_TUI_CLIENT_ID` is read from it.
 - Playlist tracks use `GET /playlists/<id>/items` — Spotify renamed this from `/tracks` (and the response's `track` field to `item`) in a February 2026 Web API migration; the old path 403s even for a playlist you own with valid scopes. This app is also in Spotify's Development Mode (not Extended Quota Mode), which limits `GET /playlists/<id>/items` to playlists you created or collaborate on — other users' playlists and Spotify-owned/algorithmic playlists will 403/404 regardless.
 - `--experimental-kitty-art` is genuinely experimental: album art renders as a real bitmap via [go-termimg](https://github.com/blacktop/go-termimg)'s auto-detected graphics protocol, but the image occupies real terminal rows that bubbletea's string-based line-diffing renderer doesn't account for, causing redraw desync (mitigated with an empirical newline-padding hack, not a real fix). ANSI half-block art (the default) is just colored text and doesn't have this problem — it's the stable choice.

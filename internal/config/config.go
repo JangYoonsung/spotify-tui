@@ -25,6 +25,13 @@ type Config struct {
 	DiagnosePlayURI    string
 	DiagnoseArt        string
 	DiagnosePlaylistID string
+	DiagnoseQueue      bool
+	DiagnoseRecommend  string
+	DiagnoseRecent     bool
+	DiagnoseTopTracks  string
+	DiagnoseMyTop      bool
+	DiagnoseAddQueue   string
+	DiagnoseSkip       bool
 
 	// ExperimentalKittyArt switches album art from ANSI half-block text to
 	// termimg.Auto (real Kitty/Sixel/iTerm2 graphics protocol if the
@@ -59,6 +66,13 @@ func Parse(args []string) (Config, error) {
 	fs.StringVar(&cfg.DiagnosePlayURI, "diagnose-play-uri", "", "with --once and --diagnose-device, call PlayURIs() with this track URI")
 	fs.StringVar(&cfg.DiagnoseArt, "diagnose-art", "", "with --once, render this image URL as ANSI art and print it")
 	fs.StringVar(&cfg.DiagnosePlaylistID, "diagnose-playlist-tracks", "", "with --once, print GetPlaylistTracks() results for this playlist ID")
+	fs.BoolVar(&cfg.DiagnoseQueue, "diagnose-queue", false, "with --once, print the playback state and GetQueue() results")
+	fs.StringVar(&cfg.DiagnoseRecommend, "diagnose-recommend", "", "with --once, probe GET /recommendations with this seed track ID (availability check)")
+	fs.BoolVar(&cfg.DiagnoseRecent, "diagnose-recent", false, "with --once, probe GET /me/player/recently-played (scope check)")
+	fs.StringVar(&cfg.DiagnoseTopTracks, "diagnose-top-tracks", "", "with --once, probe GET /artists/<id>/top-tracks")
+	fs.BoolVar(&cfg.DiagnoseMyTop, "diagnose-my-top", false, "with --once, probe GET /me/top/tracks")
+	fs.StringVar(&cfg.DiagnoseAddQueue, "diagnose-add-queue", "", "with --once, POST this track URI to the playback queue")
+	fs.BoolVar(&cfg.DiagnoseSkip, "diagnose-skip", false, "with --once, skip to the next track (queue accuracy check)")
 	fs.BoolVar(&cfg.ExperimentalKittyArt, "experimental-kitty-art", false, "placeholder — not implemented in v3, ANSI half-block art is used regardless")
 	if err := fs.Parse(args); err != nil {
 		return Config{}, err

@@ -9,46 +9,73 @@ import (
 
 // renderPlaylistsBox draws the always-visible playlists list under the
 // now-playing box (screenNowPlaying) — no key needed to reveal it.
-func renderPlaylistsBox(l listState, width int, spin string) string {
+func renderPlaylistsBox(l listState, width int, spin string, focused bool) string {
 	var b strings.Builder
-	b.WriteString(boxTop("Playlists", listTrailing(l), width))
+	b.WriteString(boxTop("Playlists", listTrailing(l), width, focused))
 	b.WriteString("\n")
 	for _, line := range renderListRows(l, width, spin) {
-		b.WriteString(boxRow(line, width))
+		b.WriteString(boxRow(line, width, focused))
 		b.WriteString("\n")
 	}
-	b.WriteString(boxBottom(width))
+	b.WriteString(boxBottom(width, focused))
 	return b.String()
 }
 
 func renderSearchScreen(m Model, width int) string {
 	var b strings.Builder
-	b.WriteString(boxTop("Search", listTrailing(m.search), width))
+	b.WriteString(boxTop("Search", listTrailing(m.search), width, true))
 	b.WriteString("\n")
 
 	if m.searchInput.Focused() || m.searchInput.Value() == "" {
-		b.WriteString(boxRow(m.searchInput.View(), width))
+		b.WriteString(boxRow(m.searchInput.View(), width, true))
 		b.WriteString("\n")
 	}
 	for _, line := range renderListRows(m.search, width, m.spin.View()) {
-		b.WriteString(boxRow(line, width))
+		b.WriteString(boxRow(line, width, true))
 		b.WriteString("\n")
 	}
 
-	b.WriteString(boxBottom(width))
+	b.WriteString(boxBottom(width, true))
 	return b.String()
 }
 
 // renderDevicesScreen lists Spotify Connect devices for playback transfer.
 func renderDevicesScreen(m Model, width int) string {
 	var b strings.Builder
-	b.WriteString(boxTop("Devices", listTrailing(m.devices), width))
+	b.WriteString(boxTop("Devices", listTrailing(m.devices), width, true))
 	b.WriteString("\n")
 	for _, line := range renderListRows(m.devices, width, m.spin.View()) {
-		b.WriteString(boxRow(line, width))
+		b.WriteString(boxRow(line, width, true))
 		b.WriteString("\n")
 	}
-	b.WriteString(boxBottom(width))
+	b.WriteString(boxBottom(width, true))
+	return b.String()
+}
+
+// renderQueueScreen shows the actual upcoming play queue — what plays next,
+// regardless of which playlist it came from.
+func renderQueueScreen(m Model, width int) string {
+	var b strings.Builder
+	b.WriteString(boxTop("Up Next", listTrailing(m.queueList), width, true))
+	b.WriteString("\n")
+	for _, line := range renderListRows(m.queueList, width, m.spin.View()) {
+		b.WriteString(boxRow(line, width, true))
+		b.WriteString("\n")
+	}
+	b.WriteString(boxBottom(width, true))
+	return b.String()
+}
+
+// renderRecentScreen shows listening history, most recent first.
+func renderRecentScreen(m Model, width int) string {
+	var b strings.Builder
+	b.WriteString(boxTop("History", listTrailing(m.recentList), width, true))
+	b.WriteString("\n")
+	for _, line := range renderListRows(m.recentList, width, m.spin.View()) {
+		b.WriteString(boxRow(line, width, true))
+		b.WriteString("\n")
+	}
+	b.WriteString(boxBottom(width, true))
 	return b.String()
 }
 
@@ -62,13 +89,13 @@ func renderPlaylistTracksBox(m Model, width int) string {
 		title = "Tracks"
 	}
 	var b strings.Builder
-	b.WriteString(boxTop(title, listTrailing(m.playlistTracks), width))
+	b.WriteString(boxTop(title, listTrailing(m.playlistTracks), width, m.focusTracks))
 	b.WriteString("\n")
 	for _, line := range renderListRows(m.playlistTracks, width, m.spin.View()) {
-		b.WriteString(boxRow(line, width))
+		b.WriteString(boxRow(line, width, m.focusTracks))
 		b.WriteString("\n")
 	}
-	b.WriteString(boxBottom(width))
+	b.WriteString(boxBottom(width, m.focusTracks))
 	return b.String()
 }
 
