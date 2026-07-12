@@ -66,6 +66,7 @@ spotify-tui --experimental-kitty-art  # real Kitty/Sixel/iTerm2 image instead of
 | `r`              | cycle repeat mode                                                                 |
 | `↑`/`k`, `↓`/`j` | move selection — playlists box by default, or the tracks box once open            |
 | `enter`          | on a playlist: open its tracks (inline, same screen). on a track: play it         |
+| `P`              | play the selected playlist as a whole (track continuation) and open its tracks    |
 | `esc`            | close the open tracks box and return focus to the playlists box                   |
 | `/`              | open search (type a query, `enter` to search, then `↑↓`/`enter` to play a result) |
 | `d`              | open the device list; `enter` switches playback to the selected device            |

@@ -1,6 +1,9 @@
 package ui
 
-import "strings"
+import (
+	"strings"
+	"time"
+)
 
 func (m Model) View() string {
 	var b strings.Builder
@@ -16,7 +19,7 @@ func (m Model) View() string {
 	case screenDevices:
 		b.WriteString(renderDevicesScreen(m, width))
 	default:
-		b.WriteString(renderWidget(m.state, m.artRendered, m.cfg.ExperimentalKittyArt, width, m.marqueeTick))
+		b.WriteString(renderWidget(interpolatedState(m.state, m.lastRefresh, time.Now()), m.artRendered, m.cfg.ExperimentalKittyArt, width, m.marqueeTick))
 		b.WriteString("\n")
 		b.WriteString(renderPlaylistsBox(m.playlists, width))
 		if m.playlistTracksTitle != "" {

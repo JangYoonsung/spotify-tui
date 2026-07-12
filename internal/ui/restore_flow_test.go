@@ -64,3 +64,26 @@ func TestRestoreFocusesTracksBox(t *testing.T) {
 		t.Fatalf("enter on pl3 after esc: title=%q loading=%v cmd=%v", m.playlistTracksTitle, m.playlistTracks.loading, cmd)
 	}
 }
+
+// P on a focused playlist starts the whole playlist as the playback context
+// AND drills into its tracks box, like enter plus playback.
+func TestPlayPlaylistKey(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	m := Model{}
+	next, _ := m.Update(playlistsResultMsg{playlists: []spotifyapi.Playlist{{ID: "pl1", Name: "A"}}})
+	m = next.(Model)
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("P")})
+	m = next.(Model)
+	if !m.actionInFlight {
+		t.Fatalf("P on a playlist did not set actionInFlight")
+	}
+	if cmd == nil {
+		t.Fatalf("P on a playlist returned no command")
+	}
+	if !m.focusTracks || !m.playlistTracks.loading || m.playlistTracksTitle != "A" {
+		t.Fatalf("P must also open the tracks box: focusTracks=%v loading=%v title=%q",
+			m.focusTracks, m.playlistTracks.loading, m.playlistTracksTitle)
+	}
+}

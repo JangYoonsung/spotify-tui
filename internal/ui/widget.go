@@ -3,11 +3,30 @@ package ui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/jangyoonsung/spotify-tui-go/internal/spotifyapi"
 )
+
+// interpolatedState returns state with ProgressMs advanced by the time
+// elapsed since lastRefresh, clamped to the track duration. The data poll
+// only lands every PollInterval (3s default) but the marquee ticker redraws
+// the view every 400ms — without this the progress bar visibly stalls
+// between polls. Paused/unknown playback is returned untouched, and the
+// original state is never mutated (the next poll re-syncs the real value).
+func interpolatedState(state *spotifyapi.PlaybackState, lastRefresh, now time.Time) *spotifyapi.PlaybackState {
+	if state == nil || !state.IsPlaying || lastRefresh.IsZero() {
+		return state
+	}
+	s := *state
+	s.ProgressMs += int(now.Sub(lastRefresh).Milliseconds())
+	if s.Item.DurationMs > 0 && s.ProgressMs > s.Item.DurationMs {
+		s.ProgressMs = s.Item.DurationMs
+	}
+	return &s
+}
 
 // defaultWidgetWidth is the fallback used only when bubbletea hasn't
 // reported a real terminal width yet (no WindowSizeMsg received).

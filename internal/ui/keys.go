@@ -3,22 +3,23 @@ package ui
 import "github.com/charmbracelet/bubbles/key"
 
 type keyMap struct {
-	Quit       key.Binding
-	PlayPause  key.Binding
-	Next       key.Binding
-	Previous   key.Binding
-	VolumeUp   key.Binding
-	VolumeDown key.Binding
-	Shuffle    key.Binding
-	Repeat     key.Binding
-	Refresh    key.Binding
-	Search     key.Binding
-	Devices    key.Binding
-	QueueAdd   key.Binding
-	Escape     key.Binding
-	Up         key.Binding
-	Down       key.Binding
-	Enter      key.Binding
+	Quit         key.Binding
+	PlayPause    key.Binding
+	Next         key.Binding
+	Previous     key.Binding
+	VolumeUp     key.Binding
+	VolumeDown   key.Binding
+	Shuffle      key.Binding
+	Repeat       key.Binding
+	Refresh      key.Binding
+	Search       key.Binding
+	Devices      key.Binding
+	QueueAdd     key.Binding
+	PlayPlaylist key.Binding
+	Escape       key.Binding
+	Up           key.Binding
+	Down         key.Binding
+	Enter        key.Binding
 }
 
 var keys = keyMap{
@@ -70,6 +71,10 @@ var keys = keyMap{
 		key.WithKeys("a"),
 		key.WithHelp("a", "queue"),
 	),
+	PlayPlaylist: key.NewBinding(
+		key.WithKeys("P"),
+		key.WithHelp("P", "play playlist"),
+	),
 	Escape: key.NewBinding(
 		key.WithKeys("esc"),
 		key.WithHelp("esc", "back"),
@@ -108,6 +113,7 @@ func helpLine(s screen, focusTracks bool) string {
 				keys.Search.Help().Key + " search  " +
 				keys.Devices.Help().Key + " devices  " +
 				"↑/↓ playlists  enter open tracks  " +
+				keys.PlayPlaylist.Help().Key + " play playlist  " +
 				keys.Quit.Help().Key + " quit",
 		)
 	}

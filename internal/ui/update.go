@@ -347,6 +347,20 @@ func (m Model) handleNowPlayingKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, keys.Down):
 			m.playlists.moveCursor(1)
 			return m, nil
+		case key.Matches(msg, keys.PlayPlaylist):
+			item, ok := m.playlists.selected()
+			if !ok {
+				return m, nil
+			}
+			// P = play the whole playlist AND drill into its tracks box —
+			// same open-and-focus behavior as enter, plus playback.
+			m.actionInFlight = true
+			m.focusTracks = true
+			m.playlistTracks = listState{loading: true}
+			m.playlistTracksTitle = item.label
+			m.currentPlaylistID = item.id
+			_ = config.SaveUIState(config.UIState{LastPlaylistID: item.id, LastPlaylistName: item.label})
+			return m, tea.Batch(m.playContextSelection(item), playlistTracksCmd(m.client, item.id))
 		case key.Matches(msg, keys.Enter):
 			item, ok := m.playlists.selected()
 			if !ok {
@@ -458,19 +472,18 @@ func (m Model) transferToDevice(item listItem) tea.Cmd {
 	})
 }
 
-// playTrackSelection always returns a real Cmd resolving to an
+// resolveDeviceAndRun wraps run with device resolution: prefer the device
+// from the last-known playback state, else pick the active (or first)
+// device from GetDevices — playback-start endpoints all need a target when
+// nothing is actively playing. Always returns a real Cmd resolving to an
 // actionResultMsg — never nil (see CLAUDE.md's actionInFlight invariant).
-func (m Model) playTrackSelection(item listItem) tea.Cmd {
-	trackURI := item.trackURI
+func (m Model) resolveDeviceAndRun(run func(deviceID string) error) tea.Cmd {
 	client := m.client
 	knownDeviceID := ""
 	if m.state != nil {
 		knownDeviceID = m.state.Device.ID
 	}
 	return actionCmd(func() error {
-		if trackURI == "" {
-			return fmt.Errorf("selected item has no track URI")
-		}
 		deviceID := knownDeviceID
 		if deviceID == "" {
 			devices, err := client.GetDevices()
@@ -489,7 +502,32 @@ func (m Model) playTrackSelection(item listItem) tea.Cmd {
 				return fmt.Errorf("no Spotify devices available — open Spotify on a device first")
 			}
 		}
+		return run(deviceID)
+	})
+}
+
+func (m Model) playTrackSelection(item listItem) tea.Cmd {
+	trackURI := item.trackURI
+	client := m.client
+	return m.resolveDeviceAndRun(func(deviceID string) error {
+		if trackURI == "" {
+			return fmt.Errorf("selected item has no track URI")
+		}
 		return client.PlayURIs(deviceID, []string{trackURI})
+	})
+}
+
+// playContextSelection starts the whole playlist as the playback context,
+// so track-to-track continuation works — unlike playTrackSelection, which
+// plays a single URI with no next-track context.
+func (m Model) playContextSelection(item listItem) tea.Cmd {
+	playlistID := item.id
+	client := m.client
+	return m.resolveDeviceAndRun(func(deviceID string) error {
+		if playlistID == "" {
+			return fmt.Errorf("selected item has no playlist ID")
+		}
+		return client.PlayContext(deviceID, "spotify:playlist:"+playlistID)
 	})
 }
 
