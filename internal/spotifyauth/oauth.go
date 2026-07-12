@@ -25,7 +25,7 @@ const (
 	// listening-history and Liked Songs features. Adding a scope here does
 	// NOT upgrade an existing cached token — a full browser --login is
 	// required before the endpoints stop 403ing.
-	scopes = "user-read-playback-state user-modify-playback-state user-read-currently-playing playlist-read-private playlist-read-collaborative user-read-recently-played user-top-read user-library-read user-library-modify"
+	scopes = "user-read-playback-state user-modify-playback-state user-read-currently-playing playlist-read-private playlist-read-collaborative user-read-recently-played user-top-read user-library-read user-library-modify streaming"
 )
 
 // Token is an OAuth token with an absolute expiry, ready to persist.

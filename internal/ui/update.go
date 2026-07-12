@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/jangyoonsung/spotify-tui-go/internal/albumart"
 	"github.com/jangyoonsung/spotify-tui-go/internal/config"
 	"github.com/jangyoonsung/spotify-tui-go/internal/spotifyapi"
+	"github.com/jangyoonsung/spotify-tui-go/internal/spotifyradio"
 )
 
 type tickMsg time.Time
@@ -781,27 +783,69 @@ func (m Model) autoplayExcludes(last spotifyapi.Track) map[string]bool {
 	return exclude
 }
 
-// similarTrackURIs assembles up to n track URIs "similar" to the query
-// artist: artist search first, the user's own top tracks as filler. The
-// endpoints that would do this properly are dead for development-mode apps
-// (GET /recommendations 404s, /artists/{id}/top-tracks 403s — both probed).
-func similarTrackURIs(client *spotifyapi.Client, query string, exclude map[string]bool, n int) []string {
+// similarTrackURIs assembles up to n track URIs "similar" to `last`.
+//
+// Primary source is Spotify's real autoplay/radio (internal/spotifyradio,
+// via go-librespot's spclient using our streaming-scoped token) — the same
+// algorithm the official clients use, seeded by the playback context when
+// there is one. If that's unavailable (no streaming scope, session/network
+// failure), it falls back to artist search + the user's top tracks, since
+// the Web API endpoints that would do this properly are dead for
+// development-mode apps (GET /recommendations 404s, /artists/{id}/top-tracks
+// 403s — both probed).
+//
+// Runs inside a tea.Cmd goroutine; `m` is a read-only snapshot there.
+func (m Model) similarTrackURIs(last spotifyapi.Track, exclude map[string]bool, n int) []string {
 	var uris []string
-	add := func(tracks []spotifyapi.Track) {
-		for _, t := range tracks {
-			if len(uris) >= n || exclude[t.ID] {
+	add := func(ids []string) {
+		for _, id := range ids {
+			if len(uris) >= n || exclude[id] {
 				continue
 			}
-			exclude[t.ID] = true
-			uris = append(uris, "spotify:track:"+t.ID)
+			exclude[id] = true
+			uris = append(uris, "spotify:track:"+id)
 		}
 	}
-	if results, err := client.SearchTracks(query, 10); err == nil {
-		add(results.Tracks)
+
+	// Radio first, seeded by the context (playlist station) or the track.
+	seed := ""
+	if m.state != nil {
+		seed = m.state.ContextURI
+	}
+	if seed == "" {
+		seed = "spotify:track:" + last.ID
+	}
+	if uid, err := m.client.CurrentUserID(); err == nil {
+		if tok, err := m.client.AccessToken(); err == nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			if ids, err := spotifyradio.AutoplayTracks(ctx, uid, tok, seed, nil); err == nil {
+				add(ids)
+			}
+			cancel()
+		}
+	}
+	if len(uris) >= n {
+		return uris
+	}
+
+	// Fallback: artist search + the user's top tracks.
+	query := last.Name
+	if len(last.Artists) > 0 {
+		query = last.Artists[0]
+	}
+	addTracks := func(tracks []spotifyapi.Track) {
+		ids := make([]string, 0, len(tracks))
+		for _, t := range tracks {
+			ids = append(ids, t.ID)
+		}
+		add(ids)
+	}
+	if results, err := m.client.SearchTracks(query, 10); err == nil {
+		addTracks(results.Tracks)
 	}
 	if len(uris) < n {
-		if top, err := client.GetMyTopTracks(20); err == nil {
-			add(top)
+		if top, err := m.client.GetMyTopTracks(20); err == nil {
+			addTracks(top)
 		}
 	}
 	return uris
@@ -818,7 +862,7 @@ func (m Model) autoplaySimilarCmd(last spotifyapi.Track) tea.Cmd {
 		query = last.Artists[0]
 	}
 	return m.resolveDeviceAndRun(func(deviceID string) error {
-		uris := similarTrackURIs(client, query, exclude, 10)
+		uris := m.similarTrackURIs(last, exclude, 10)
 		if len(uris) == 0 {
 			return fmt.Errorf("autoplay: no similar tracks found for %q", query)
 		}
@@ -846,7 +890,7 @@ func (m Model) seedAutoplayCmd(last spotifyapi.Track) tea.Cmd {
 	}
 	forID := last.ID
 	return func() tea.Msg {
-		uris := similarTrackURIs(client, query, exclude, 2)
+		uris := m.similarTrackURIs(last, exclude, 2)
 		if len(uris) == 0 {
 			return autoplaySeedResultMsg{forTrackID: forID, err: fmt.Errorf("no similar tracks for %q", query)}
 		}

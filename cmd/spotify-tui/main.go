@@ -4,9 +4,11 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"sync"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -14,6 +16,7 @@ import (
 	"github.com/jangyoonsung/spotify-tui-go/internal/config"
 	"github.com/jangyoonsung/spotify-tui-go/internal/spotifyapi"
 	"github.com/jangyoonsung/spotify-tui-go/internal/spotifyauth"
+	"github.com/jangyoonsung/spotify-tui-go/internal/spotifyradio"
 	"github.com/jangyoonsung/spotify-tui-go/internal/ui"
 )
 
@@ -79,6 +82,8 @@ func run() error {
 		return report1("AddToQueue", client.AddToQueue(cfg.DiagnoseAddQueue))
 	case cfg.DiagnoseSkip:
 		return report1("Next", client.Next())
+	case cfg.DiagnoseAutoplay != "":
+		return runDiagnoseAutoplay(client, cfg.DiagnoseAutoplay)
 	case cfg.DiagnoseRecent:
 		tracks, err := client.GetRecentlyPlayed(10)
 		if err != nil {
@@ -212,6 +217,28 @@ func runDiagnoseArt(imageURL string, useKitty bool) error {
 		return err
 	}
 	fmt.Println(art)
+	return nil
+}
+
+func runDiagnoseAutoplay(client *spotifyapi.Client, seedURI string) error {
+	uid, err := client.CurrentUserID()
+	if err != nil {
+		return fmt.Errorf("get user id: %w", err)
+	}
+	token, err := client.AccessToken()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	ids, err := spotifyradio.AutoplayTracks(ctx, uid, token, seedURI, nil)
+	if err != nil {
+		return err
+	}
+	for _, id := range ids {
+		fmt.Printf("autoplay: spotify:track:%s\n", id)
+	}
+	fmt.Printf("total: %d\n", len(ids))
 	return nil
 }
 

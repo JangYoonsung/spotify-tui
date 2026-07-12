@@ -1,6 +1,7 @@
 package spotifyapi
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -47,6 +48,38 @@ func (c *Client) do(method, path string, body io.Reader, contentType string) (*h
 		req.Header.Set("Content-Type", contentType)
 	}
 	return c.http.Do(req)
+}
+
+// AccessToken exposes the current bearer token. The go-librespot autoplay
+// path (internal/spotifyradio) authenticates its own session with the raw
+// token — this hands it over without leaking token storage, which stays
+// behind the TokenSource closure.
+func (c *Client) AccessToken() (string, error) {
+	return c.tokenSource()
+}
+
+// CurrentUserID fetches GET /me and returns the Spotify user id (needed as
+// the username for the autoplay librespot session).
+func (c *Client) CurrentUserID() (string, error) {
+	resp, err := c.do(http.MethodGet, "/me", nil, "")
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	if err := classifyStatus(resp, data); err != nil {
+		return "", err
+	}
+	var me struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(data, &me); err != nil {
+		return "", fmt.Errorf("parse /me: %w", err)
+	}
+	return me.ID, nil
 }
 
 // classifyStatus turns a non-2xx status into a typed/descriptive error.

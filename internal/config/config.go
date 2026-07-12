@@ -32,6 +32,7 @@ type Config struct {
 	DiagnoseMyTop      bool
 	DiagnoseAddQueue   string
 	DiagnoseSkip       bool
+	DiagnoseAutoplay   string
 
 	// ExperimentalKittyArt switches album art from ANSI half-block text to
 	// termimg.Auto (real Kitty/Sixel/iTerm2 graphics protocol if the
@@ -73,6 +74,7 @@ func Parse(args []string) (Config, error) {
 	fs.BoolVar(&cfg.DiagnoseMyTop, "diagnose-my-top", false, "with --once, probe GET /me/top/tracks")
 	fs.StringVar(&cfg.DiagnoseAddQueue, "diagnose-add-queue", "", "with --once, POST this track URI to the playback queue")
 	fs.BoolVar(&cfg.DiagnoseSkip, "diagnose-skip", false, "with --once, skip to the next track (queue accuracy check)")
+	fs.StringVar(&cfg.DiagnoseAutoplay, "diagnose-autoplay", "", "with --once, print Spotify autoplay/radio track IDs seeded by this context/track URI (needs the streaming scope)")
 	fs.BoolVar(&cfg.ExperimentalKittyArt, "experimental-kitty-art", false, "placeholder — not implemented in v3, ANSI half-block art is used regardless")
 	if err := fs.Parse(args); err != nil {
 		return Config{}, err
