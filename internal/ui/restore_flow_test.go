@@ -417,3 +417,71 @@ func TestQueueRepollAfterTracksLoad(t *testing.T) {
 		t.Fatalf("post-load: nextTrack = %q, want empty (wrap-around suppressed)", got)
 	}
 }
+
+// atPlaylistEnd detects sitting on the last track of the shown playlist,
+// played straight — where the queue's wrap-around is fake.
+func TestAtPlaylistEnd(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	m := New(nil, config.Config{})
+	next, _ := m.Update(playlistTracksResultMsg{tracks: []spotifyapi.Track{
+		{ID: "a"}, {ID: "b"}, {ID: "c"},
+	}})
+	m = next.(Model)
+	m.currentPlaylistID = "pl9"
+	base := spotifyapi.PlaybackState{RepeatState: "off", ContextURI: "spotify:playlist:pl9"}
+
+	end := base
+	end.Item = spotifyapi.Track{ID: "c"}
+	m.state = &end
+	if !m.atPlaylistEnd() {
+		t.Fatal("last track should be atPlaylistEnd")
+	}
+
+	mid := base
+	mid.Item = spotifyapi.Track{ID: "b"}
+	m.state = &mid
+	if m.atPlaylistEnd() {
+		t.Fatal("mid track is not the end")
+	}
+
+	shuf := base
+	shuf.ShuffleState = true
+	shuf.Item = spotifyapi.Track{ID: "c"}
+	m.state = &shuf
+	if m.atPlaylistEnd() {
+		t.Fatal("shuffle: position meaningless, not end")
+	}
+
+	other := base
+	other.ContextURI = "spotify:playlist:plOTHER"
+	other.Item = spotifyapi.Track{ID: "c"}
+	m.state = &other
+	if m.atPlaylistEnd() {
+		t.Fatal("different context is not this playlist's end")
+	}
+}
+
+// At the playlist's end, radio autoplay results replace the fake wrap-around
+// as the "next" label.
+func TestRadioReplacesWrapAtEnd(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	m := New(nil, config.Config{})
+	next, _ := m.Update(playlistTracksResultMsg{tracks: []spotifyapi.Track{
+		{ID: "a"}, {ID: "b"}, {ID: "c"},
+	}})
+	m = next.(Model)
+	m.currentPlaylistID = "pl9"
+	m.state = &spotifyapi.PlaybackState{
+		RepeatState: "off", ContextURI: "spotify:playlist:pl9",
+		Item: spotifyapi.Track{ID: "c"},
+	}
+	m.radioForContext = "spotify:playlist:pl9"
+
+	next, _ = m.Update(radioResultMsg{
+		forContext: "spotify:playlist:pl9",
+		tracks:     []spotifyapi.Track{{ID: "r1", Name: "Radio One", Artists: []string{"Artist"}}},
+	})
+	if got := next.(Model).nextTrack; got != "Radio One — Artist" {
+		t.Fatalf("radio next = %q, want \"Radio One — Artist\"", got)
+	}
+}

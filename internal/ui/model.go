@@ -62,6 +62,13 @@ type Model struct {
 	// nextTrack is the "up next" label from GET /me/player/queue — fetched
 	// on track change and after control actions, cleared while unknown.
 	nextTrack string
+	// radioTracks holds Spotify's real autoplay/radio for when playback sits
+	// at the end of a playlist: there the queue endpoint lies (it wraps
+	// around to the playlist's first track), so both the "next" label and
+	// the Up Next screen show these instead. radioForContext tags which
+	// context they were fetched for, so a stale fetch isn't reused.
+	radioTracks     []spotifyapi.Track
+	radioForContext string
 	// likedCurrent/likedForID: whether the CURRENT track is in Liked Songs
 	// — checked once per track change, toggled optimistically by the l key.
 	likedCurrent bool

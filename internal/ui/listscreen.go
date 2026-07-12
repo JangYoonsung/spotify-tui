@@ -56,7 +56,12 @@ func renderDevicesScreen(m Model, width int) string {
 // regardless of which playlist it came from.
 func renderQueueScreen(m Model, width int) string {
 	var b strings.Builder
-	b.WriteString(boxTop("Up Next", listTrailing(m.queueList), width, true))
+	title := "Up Next"
+	if m.atPlaylistEnd() && len(m.radioTracks) > 0 {
+		// The playlist ended; these are Spotify's radio picks, not the queue.
+		title = "Up Next · radio"
+	}
+	b.WriteString(boxTop(title, listTrailing(m.queueList), width, true))
 	b.WriteString("\n")
 	for _, line := range renderListRows(m.queueList, width, m.spin.View()) {
 		b.WriteString(boxRow(line, width, true))

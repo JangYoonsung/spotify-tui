@@ -6,7 +6,45 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 )
+
+// GetTracks fetches metadata for up to 50 track IDs in one call
+// (GET /tracks?ids=). Used to turn bare radio track IDs into displayable
+// tracks; IDs past 50 are ignored (radio batches are smaller than that).
+func (c *Client) GetTracks(ids []string) ([]Track, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	if len(ids) > 50 {
+		ids = ids[:50]
+	}
+	q := url.Values{"ids": {strings.Join(ids, ",")}}
+	resp, err := c.do(http.MethodGet, "/tracks?"+q.Encode(), nil, "")
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if err := classifyStatus(resp, data); err != nil {
+		return nil, err
+	}
+	var raw struct {
+		Tracks []rawTrack `json:"tracks"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, fmt.Errorf("parse tracks: %w", err)
+	}
+	tracks := make([]Track, 0, len(raw.Tracks))
+	for _, t := range raw.Tracks {
+		tracks = append(tracks, t.toTrack())
+	}
+	return tracks, nil
+}
 
 // SearchResults is trimmed to track-only search — the minimum needed for
 // "find a song, play it." Album/artist/playlist search is out of v3 scope.

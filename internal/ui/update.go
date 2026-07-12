@@ -84,6 +84,14 @@ type recentResultMsg struct {
 	err    error
 }
 
+// radioResultMsg carries Spotify's real autoplay/radio for the playlist end,
+// tagged with the context it was fetched for (stale-guard).
+type radioResultMsg struct {
+	forContext string
+	tracks     []spotifyapi.Track
+	err        error
+}
+
 // likedResultMsg reports whether the current track is in Liked Songs.
 type likedResultMsg struct {
 	forTrackID string
@@ -180,6 +188,50 @@ func recentCmd(client *spotifyapi.Client) tea.Cmd {
 		tracks, err := client.GetRecentlyPlayed(50)
 		return recentResultMsg{tracks: tracks, err: err}
 	}
+}
+
+// radioCmd fetches Spotify's autoplay/radio for contextURI (go-librespot
+// spclient) and resolves the track IDs to displayable tracks via the Web
+// API. Off the UI goroutine — it opens a librespot session (~1-2s).
+func radioCmd(client *spotifyapi.Client, contextURI string) tea.Cmd {
+	return func() tea.Msg {
+		uid, err := client.CurrentUserID()
+		if err != nil {
+			return radioResultMsg{forContext: contextURI, err: err}
+		}
+		tok, err := client.AccessToken()
+		if err != nil {
+			return radioResultMsg{forContext: contextURI, err: err}
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		ids, err := spotifyradio.AutoplayTracks(ctx, uid, tok, contextURI, nil)
+		if err != nil {
+			return radioResultMsg{forContext: contextURI, err: err}
+		}
+		tracks, err := client.GetTracks(ids)
+		return radioResultMsg{forContext: contextURI, tracks: tracks, err: err}
+	}
+}
+
+// atPlaylistEnd reports whether playback is sitting on the last track of the
+// playlist the tracks box is showing, played straight (no shuffle/repeat).
+// There the queue endpoint reports a fake wrap-around to the first track, so
+// callers substitute Spotify's real radio autoplay instead.
+func (m Model) atPlaylistEnd() bool {
+	if m.state == nil || m.state.RepeatState != "off" || m.state.ShuffleState {
+		return false
+	}
+	id, ok := strings.CutPrefix(m.state.ContextURI, "spotify:playlist:")
+	if !ok || id != m.currentPlaylistID {
+		return false
+	}
+	items := m.playlistTracks.list.Items()
+	if len(items) == 0 {
+		return false
+	}
+	last, ok := items[len(items)-1].(listItem)
+	return ok && last.id == m.state.Item.ID
 }
 
 // dedupTracks collapses repeated track IDs to their first (most recent)
@@ -398,6 +450,31 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.nextTrack = trackLabel(msg.tracks[0])
 				}
 			}
+			// At the playlist's end the queue's wrap-around is a lie — the
+			// real "next" is Spotify's radio autoplay. Show the fetched radio,
+			// or kick off the fetch (once per context).
+			if m.atPlaylistEnd() {
+				if len(m.radioTracks) > 0 && m.radioForContext == m.state.ContextURI {
+					m.nextTrack = trackLabel(m.radioTracks[0])
+				} else if m.radioForContext != m.state.ContextURI {
+					m.radioForContext = m.state.ContextURI
+					return m, radioCmd(m.client, m.state.ContextURI)
+				}
+			}
+		}
+		return m, nil
+
+	case radioResultMsg:
+		// Silent on error — radio is a best-effort garnish. Ignore if a newer
+		// context has since been requested.
+		if msg.err == nil && msg.forContext == m.radioForContext {
+			m.radioTracks = msg.tracks
+			if m.atPlaylistEnd() && len(msg.tracks) > 0 {
+				m.nextTrack = trackLabel(msg.tracks[0])
+			}
+			if m.screen == screenQueue {
+				m.queueList.setItems(trackItems(msg.tracks))
+			}
 		}
 		return m, nil
 
@@ -473,7 +550,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.queueList.loading = false
 		m.queueList.err = msg.err
 		if msg.err == nil {
-			m.queueList.setItems(trackItems(msg.tracks))
+			// At the playlist's end the raw queue is a wrap-around lie — show
+			// the real radio autoplay if we have it, and kick off the fetch if
+			// not (it replaces the list when it arrives via radioResultMsg).
+			if m.atPlaylistEnd() && len(m.radioTracks) > 0 {
+				m.queueList.setItems(trackItems(m.radioTracks))
+			} else {
+				m.queueList.setItems(trackItems(msg.tracks))
+			}
+		}
+		if m.atPlaylistEnd() && m.radioForContext != m.state.ContextURI {
+			m.radioForContext = m.state.ContextURI
+			return m, radioCmd(m.client, m.state.ContextURI)
 		}
 		return m, nil
 
@@ -758,6 +846,12 @@ func (m Model) queueTrack(item listItem) tea.Cmd {
 func (m Model) transferToDevice(item listItem) tea.Cmd {
 	deviceID := item.id
 	client := m.client
+	// Selecting the device that's already playing is a no-op: Spotify 403s
+	// ("Player command failed") on a transfer to the active device, and
+	// there's nothing to move anyway.
+	if m.state != nil && m.state.Device.ID == deviceID {
+		return actionCmd(func() error { return nil })
+	}
 	return actionCmd(func() error {
 		if deviceID == "" {
 			return fmt.Errorf("selected device has no ID")
