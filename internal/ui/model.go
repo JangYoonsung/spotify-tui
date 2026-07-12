@@ -75,6 +75,10 @@ func New(client *spotifyapi.Client, cfg config.Config) Model {
 		m.currentPlaylistID = st.LastPlaylistID
 		m.playlistTracksTitle = st.LastPlaylistName
 		m.playlistTracks = listState{loading: true}
+		// Focus the restored tracks box, matching the state the user quit in
+		// (they had a playlist open): up/down/enter pick a track right away.
+		// Esc hands focus back to the playlists box as usual.
+		m.focusTracks = true
 	}
 	return m
 }
