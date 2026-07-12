@@ -223,7 +223,15 @@ func progressLine(s spotifyapi.PlaybackState, width int) string {
 	if filled > barWidth {
 		filled = barWidth
 	}
-	bar := barFillStyle.Render(strings.Repeat("█", filled)) + dimStyle.Render(strings.Repeat("░", barWidth-filled))
+	// Line-with-playhead (━━●──) instead of solid blocks: the moving ●
+	// gives the interpolated progress a focal point, and the thin line
+	// visually recedes under the track title above it.
+	var bar string
+	if filled <= 0 {
+		bar = barFillStyle.Render("●") + dimStyle.Render(strings.Repeat("─", barWidth-1))
+	} else {
+		bar = barFillStyle.Render(strings.Repeat("━", filled-1)+"●") + dimStyle.Render(strings.Repeat("─", barWidth-filled))
+	}
 	return bar + " " + ts
 }
 

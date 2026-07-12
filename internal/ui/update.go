@@ -274,6 +274,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Track changed: clear the stale "next" label and refetch the
 			// queue for the new track (not every poll — one extra call per
 			// track change, not per 3s tick).
+			m.playlistTracks.setNowPlaying(msg.state.Item.ID)
 			m.nextTrack = ""
 			cmds := []tea.Cmd{queueCmd(m.client, msg.state.Item.ID), checkLikedCmd(m.client, msg.state.Item.ID)}
 			imageURL := albumart.PickImageURL(msg.state.Item.Images, artCols*8, artRows*2*8)
@@ -425,6 +426,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.playlistTracks.err = msg.err
 		if msg.err == nil {
 			m.playlistTracks.setItems(trackItems(msg.tracks))
+			if m.state != nil {
+				m.playlistTracks.setNowPlaying(m.state.Item.ID)
+			}
 			// One-shot: only the restart restore — playlists opened later
 			// (or a re-fetch) start at the top as usual.
 			m.playlistTracks.selectID(m.restoreTrackID)

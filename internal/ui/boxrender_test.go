@@ -33,3 +33,30 @@ func TestListBoxHugsContentAndWidth(t *testing.T) {
 		}
 	}
 }
+
+// The ♪ now-playing marker and the cursor's background bar must not break
+// row widths (background styling changes the ANSI structure of the line).
+func TestNowPlayingMarkerAndCursorBar(t *testing.T) {
+	const width = 56
+	l := newListState()
+	l.list.SetSize(width-4, listVisibleRows)
+	l.setItems([]list.Item{
+		listItem{label: "one", id: "t1", duration: "3:20"},
+		listItem{label: "two", id: "t2", duration: "4:05"},
+	})
+	l.setNowPlaying("t2") // cursor sits on t1, ♪ on t2
+
+	out := renderPlaylistsBox(l, width, "x", true)
+	lines := strings.Split(out, "\n")
+	for i, line := range lines {
+		if w := lipgloss.Width(line); w != width {
+			t.Fatalf("line %d width = %d, want %d: %q", i, w, width, line)
+		}
+	}
+	if !strings.Contains(out, "♪") {
+		t.Fatalf("now-playing row missing ♪ marker:\n%s", out)
+	}
+	if !strings.Contains(out, "▸") {
+		t.Fatalf("cursor row missing ▸ marker:\n%s", out)
+	}
+}

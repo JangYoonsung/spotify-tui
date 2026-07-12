@@ -42,6 +42,13 @@ var (
 	boxTitleUnfocused = lipgloss.NewStyle().Foreground(lipgloss.Color("242"))
 	boxTitlePrimary   = lipgloss.NewStyle().Bold(true).Foreground(accentBright)
 
+	// The cursor row gets a subtle background so the selection reads as a
+	// bar, not just a brighter label; the ♪ marker tags the row that's
+	// actually playing, independent of where the cursor is.
+	cursorRowStyle     = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("255")).Background(lipgloss.Color("236"))
+	cursorRowMetaStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Background(lipgloss.Color("236"))
+	nowPlayingRowStyle = lipgloss.NewStyle().Foreground(accentMid)
+
 	accentStyle  = lipgloss.NewStyle().Bold(true).Foreground(accentBright)
 	playStyle    = accentStyle
 	pauseStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))

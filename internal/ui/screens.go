@@ -60,6 +60,10 @@ type listState struct {
 	list    list.Model
 	loading bool
 	err     error
+	// delegate inputs, kept so either can change without recomputing the
+	// other (SetDelegate replaces the whole value).
+	durationCol int
+	nowPlaying  string
 }
 
 const listVisibleRows = 12
@@ -88,18 +92,32 @@ func loadingListState() listState {
 // setItems installs items and a delegate sized to the widest duration
 // present, resetting any leftover filter from the previous item set.
 func (l *listState) setItems(items []list.Item) {
-	durationCol := 0
+	l.durationCol = 0
 	for _, it := range items {
 		if li, ok := it.(listItem); ok {
-			if w := lipgloss.Width(li.duration); w > durationCol {
-				durationCol = w
+			if w := lipgloss.Width(li.duration); w > l.durationCol {
+				l.durationCol = w
 			}
 		}
 	}
-	l.list.SetDelegate(compactDelegate{durationCol: durationCol})
+	l.refreshDelegate()
 	l.list.ResetFilter()
 	l.list.SetItems(items)
 	l.list.Select(0)
+}
+
+// setNowPlaying tags the row that's actually playing (♪ marker) — called on
+// every track change, so it must not disturb items/cursor/filter.
+func (l *listState) setNowPlaying(trackID string) {
+	if l.nowPlaying == trackID {
+		return
+	}
+	l.nowPlaying = trackID
+	l.refreshDelegate()
+}
+
+func (l *listState) refreshDelegate() {
+	l.list.SetDelegate(compactDelegate{durationCol: l.durationCol, nowPlayingID: l.nowPlaying})
 }
 
 // selectID moves the cursor to the item with the given id, if present.
@@ -130,11 +148,13 @@ func listNavMatches(l list.Model, msg tea.KeyMsg) bool {
 		k.GoToStart, k.GoToEnd, k.Filter, k.ClearFilter)
 }
 
-// compactDelegate renders one-line rows in this app's box style (accent ▸
-// cursor, duration right-aligned to a fixed column) — list.DefaultDelegate's
-// two-line title/description items are too tall for a docked widget.
+// compactDelegate renders one-line rows in this app's box style (cursor row
+// as a background bar, ♪ on the actually-playing row, duration right-aligned
+// to a fixed column) — list.DefaultDelegate's two-line title/description
+// items are too tall for a docked widget.
 type compactDelegate struct {
-	durationCol int
+	durationCol  int
+	nowPlayingID string
 }
 
 func (d compactDelegate) Height() int                               { return 1 }
@@ -146,7 +166,7 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 	if !ok {
 		return
 	}
-	labelWidth := m.Width() - 2 // "▸ "/"  " prefix
+	labelWidth := m.Width() - 2 // "▸ "/"♪ "/"  " prefix
 	if d.durationCol > 0 {
 		labelWidth -= d.durationCol + 1 // space before the duration column
 	}
@@ -156,14 +176,33 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 	label := ansi.Truncate(it.label, labelWidth, "…")
 	label += strings.Repeat(" ", labelWidth-lipgloss.Width(label))
 
-	prefix, labelStyle := "  ", metaStyle
-	if index == m.Index() {
-		prefix, labelStyle = accentStyle.Render("▸ "), titleTextStyle
+	cursor := index == m.Index()
+	playing := d.nowPlayingID != "" && it.id == d.nowPlayingID
+
+	// Cursor wins the prefix slot; a playing row that isn't under the
+	// cursor shows ♪ instead of the padding.
+	prefix := "  "
+	switch {
+	case cursor:
+		prefix = accentStyle.Render("▸ ")
+	case playing:
+		prefix = accentStyle.Render("♪ ")
 	}
+
+	labelStyle, durStyle := metaStyle, metaStyle
+	switch {
+	case cursor:
+		// Background bar across label and duration so the selection reads
+		// as one row, not disconnected bright fragments.
+		labelStyle, durStyle = cursorRowStyle, cursorRowMetaStyle
+	case playing:
+		labelStyle = nowPlayingRowStyle
+	}
+
 	line := prefix + labelStyle.Render(label)
 	if d.durationCol > 0 {
 		dur := strings.Repeat(" ", d.durationCol-lipgloss.Width(it.duration)) + it.duration
-		line += " " + metaStyle.Render(dur)
+		line += durStyle.Render(" " + dur)
 	}
 	fmt.Fprint(w, line)
 }
