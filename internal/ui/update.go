@@ -8,6 +8,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/jangyoonsung/spotify-tui-go/internal/albumart"
+	"github.com/jangyoonsung/spotify-tui-go/internal/config"
 	"github.com/jangyoonsung/spotify-tui-go/internal/spotifyapi"
 )
 
@@ -195,6 +196,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if item, ok := m.playlists.selected(); ok {
 				prevID = item.id
 			}
+			if prevID == "" {
+				// Initial load: land the cursor on the playlist restored from
+				// the previous run, if any.
+				prevID = m.restorePlaylistID
+			}
 			m.playlists.items = playlistItems(msg.playlists)
 			m.playlists.cursor, m.playlists.scrollTop = 0, 0
 			if prevID != "" {
@@ -214,6 +220,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err == nil {
 			m.playlistTracks.items = trackItems(msg.tracks)
 			m.playlistTracks.cursor, m.playlistTracks.scrollTop = 0, 0
+			if m.restoreTrackID != "" {
+				for i, it := range m.playlistTracks.items {
+					if it.id == m.restoreTrackID {
+						m.playlistTracks.cursor = i
+						if i >= listVisibleRows {
+							m.playlistTracks.scrollTop = i - listVisibleRows + 1
+						}
+						break
+					}
+				}
+				// One-shot: only the restart restore — playlists opened later
+				// (or a re-fetch) start at the top as usual.
+				m.restoreTrackID = ""
+			}
 		}
 		return m, nil
 
@@ -303,6 +323,13 @@ func (m Model) handleNowPlayingKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			m.actionInFlight = true
+			// Persist which track was played so the next launch puts the
+			// tracks-box cursor back on it (best-effort, like the playlist).
+			_ = config.SaveUIState(config.UIState{
+				LastPlaylistID:   m.currentPlaylistID,
+				LastPlaylistName: m.playlistTracksTitle,
+				LastTrackID:      item.id,
+			})
 			return m, m.playTrackSelection(item)
 		case key.Matches(msg, keys.QueueAdd):
 			item, ok := m.playlistTracks.selected()
@@ -328,6 +355,12 @@ func (m Model) handleNowPlayingKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.focusTracks = true
 			m.playlistTracks = listState{loading: true}
 			m.playlistTracksTitle = item.label
+			m.currentPlaylistID = item.id
+			// Best-effort persist so the tracks box survives a restart (the
+			// widget lives in a cmux dock and restarts with it) — a failed
+			// write only costs the convenience, not worth surfacing. No
+			// LastTrackID: picking a playlist starts its tracks at the top.
+			_ = config.SaveUIState(config.UIState{LastPlaylistID: item.id, LastPlaylistName: item.label})
 			return m, playlistTracksCmd(m.client, item.id)
 		}
 	}

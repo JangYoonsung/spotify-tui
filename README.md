@@ -20,7 +20,7 @@ A terminal now-playing widget for Spotify, built with [Bubble Tea](https://githu
 ╰──────────────────────────────────────────────────────╯
 ```
 
-Playlists load automatically and stay visible on the main screen — no key needed to reveal them. Picking one (`enter`) opens a third box, inline on the same screen, listing that playlist's tracks (title = playlist name); picking a track plays it. `esc` closes the tracks box and returns focus to Playlists.
+Playlists load automatically and stay visible on the main screen — no key needed to reveal them. Picking one (`enter`) opens a third box, inline on the same screen, listing that playlist's tracks (title = playlist name); picking a track plays it. `esc` closes the tracks box and returns focus to Playlists. The last-opened playlist and last-played track are remembered across restarts (`~/.config/spotify-tui-go/state.json`) — on the next launch the tracks box reopens automatically with the cursor back on that track (nothing auto-plays).
 
 ## Setup
 
@@ -68,8 +68,8 @@ spotify-tui --experimental-kitty-art  # real Kitty/Sixel/iTerm2 image instead of
 | `enter`          | on a playlist: open its tracks (inline, same screen). on a track: play it         |
 | `esc`            | close the open tracks box and return focus to the playlists box                   |
 | `/`              | open search (type a query, `enter` to search, then `↑↓`/`enter` to play a result) |
-| `d`              | open the device list; `enter` switches playback to the selected device           |
-| `a`              | in search results or a tracks list: add the selected track to the queue          |
+| `d`              | open the device list; `enter` switches playback to the selected device            |
+| `a`              | in search results or a tracks list: add the selected track to the queue           |
 | `R`              | force refresh (playback state + playlists)                                        |
 | `q` / `ctrl+c`   | quit                                                                              |
 

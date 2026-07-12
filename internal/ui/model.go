@@ -27,6 +27,19 @@ type Model struct {
 
 	playlistTracks      listState
 	playlistTracksTitle string
+	// restorePlaylistID is the last-opened playlist persisted from a previous
+	// run (config.UIState) — Init() re-fetches its tracks so the tracks box
+	// survives a restart, and playlistsResultMsg uses it to put the playlists
+	// cursor back on that entry on the initial load.
+	restorePlaylistID string
+	// restoreTrackID puts the tracks-box cursor back on the last-played track
+	// once the restored playlist's tracks arrive. One-shot: cleared after the
+	// first playlistTracksResultMsg so later playlist opens start at the top.
+	restoreTrackID string
+	// currentPlaylistID is whichever playlist the tracks box is showing —
+	// needed when persisting UIState on track play (playlistTracksTitle only
+	// keeps the display name).
+	currentPlaylistID string
 	// focusTracks: false = up/down/enter drive the playlists list; true =
 	// they drive the playlistTracks list instead. Both boxes stay visible
 	// on screenNowPlaying regardless — this only changes which one keyboard
@@ -50,13 +63,26 @@ func New(client *spotifyapi.Client, cfg config.Config) Model {
 	ti.Placeholder = "search tracks..."
 	ti.CharLimit = 100
 
-	return Model{
+	m := Model{
 		client:      client,
 		cfg:         cfg,
 		searchInput: ti,
 	}
+
+	if st := config.LoadUIState(); st.LastPlaylistID != "" {
+		m.restorePlaylistID = st.LastPlaylistID
+		m.restoreTrackID = st.LastTrackID
+		m.currentPlaylistID = st.LastPlaylistID
+		m.playlistTracksTitle = st.LastPlaylistName
+		m.playlistTracks = listState{loading: true}
+	}
+	return m
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(refreshCmd(m.client), playlistsCmd(m.client), tickCmd(m.cfg.PollInterval), marqueeTickCmd())
+	cmds := []tea.Cmd{refreshCmd(m.client), playlistsCmd(m.client), tickCmd(m.cfg.PollInterval), marqueeTickCmd()}
+	if m.restorePlaylistID != "" {
+		cmds = append(cmds, playlistTracksCmd(m.client, m.restorePlaylistID))
+	}
+	return tea.Batch(cmds...)
 }

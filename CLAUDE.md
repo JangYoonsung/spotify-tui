@@ -38,7 +38,7 @@ Control keys do an **optimistic update** (flip `m.state` locally) and set `actio
 
 ### Home screen layout (v3)
 
-There's no separate "playlists screen" or "track list screen" — `screenNowPlaying` renders the now-playing box, an always-visible playlists list, and (once a playlist is picked) that playlist's tracks, all stacked on one screen. `Model.focusTracks` decides whether up/down/enter drive the playlists list or the tracks list; both stay rendered regardless of focus. Secondary screens: `screenSearch` (text input + results) and `screenDevices` (`d`; enter transfers playback to the selected device).
+There's no separate "playlists screen" or "track list screen" — `screenNowPlaying` renders the now-playing box, an always-visible playlists list, and (once a playlist is picked) that playlist's tracks, all stacked on one screen. `Model.focusTracks` decides whether up/down/enter drive the playlists list or the tracks list; both stay rendered regardless of focus. Secondary screens: `screenSearch` (text input + results) and `screenDevices` (`d`; enter transfers playback to the selected device). The last-opened playlist and last-played track are persisted best-effort to `~/.config/spotify-tui-go/state.json` (`config.UIState`) and restored in `ui.New`/`Init` so the tracks box (cursor included) survives the cmux dock restarting the widget. Track restore is one-shot (`restoreTrackID` cleared on first `playlistTracksResultMsg`); nothing auto-plays.
 
 ### Playback API notes (playback.go / playlists.go)
 
@@ -50,4 +50,4 @@ There's no separate "playlists screen" or "track list screen" — `screenNowPlay
 ## Conventions
 
 - Secrets never live in committed files; `client_id` comes only from `SPOTIFY_TUI_CLIENT_ID` (`.env` is gitignored).
-- Comments explain *why* (hidden constraints, workarounds for specific bugs, non-obvious API behavior) — not *what* the code does. Don't add narrative comments referencing how/when something was fixed; that belongs in commit messages.
+- Comments explain _why_ (hidden constraints, workarounds for specific bugs, non-obvious API behavior) — not _what_ the code does. Don't add narrative comments referencing how/when something was fixed; that belongs in commit messages.
