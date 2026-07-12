@@ -3,6 +3,9 @@ package ui
 import (
 	"fmt"
 	"strings"
+
+	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // renderPlaylistsBox draws the always-visible playlists list under the
@@ -11,7 +14,7 @@ func renderPlaylistsBox(l listState, width int) string {
 	var b strings.Builder
 	b.WriteString(boxTop("Playlists", listTrailing(l), width))
 	b.WriteString("\n")
-	for _, line := range renderListRows(l) {
+	for _, line := range renderListRows(l, width) {
 		b.WriteString(boxRow(line, width))
 		b.WriteString("\n")
 	}
@@ -28,7 +31,7 @@ func renderSearchScreen(m Model, width int) string {
 		b.WriteString(boxRow(m.searchInput.View(), width))
 		b.WriteString("\n")
 	}
-	for _, line := range renderListRows(m.search) {
+	for _, line := range renderListRows(m.search, width) {
 		b.WriteString(boxRow(line, width))
 		b.WriteString("\n")
 	}
@@ -49,7 +52,7 @@ func renderPlaylistTracksBox(m Model, width int) string {
 	var b strings.Builder
 	b.WriteString(boxTop(title, listTrailing(m.playlistTracks), width))
 	b.WriteString("\n")
-	for _, line := range renderListRows(m.playlistTracks) {
+	for _, line := range renderListRows(m.playlistTracks, width) {
 		b.WriteString(boxRow(line, width))
 		b.WriteString("\n")
 	}
@@ -64,7 +67,7 @@ func listTrailing(l listState) string {
 	return fmt.Sprintf("%d/%d", l.cursor+1, len(l.items))
 }
 
-func renderListRows(l listState) []string {
+func renderListRows(l listState, width int) []string {
 	switch {
 	case l.loading:
 		return []string{dimStyle.Render("⠋ loading…")}
@@ -74,14 +77,41 @@ func renderListRows(l listState) []string {
 		return []string{dimStyle.Render("· no results")}
 	}
 
+	// Right-align duration to a fixed column (rather than trailing wherever
+	// each row's label happens to end) so the whole list reads as a table,
+	// not ragged text — measured from the widest duration actually present
+	// so playlist rows (no duration at all) don't reserve dead space.
+	durationCol := 0
+	for _, it := range l.items {
+		if w := lipgloss.Width(it.duration); w > durationCol {
+			durationCol = w
+		}
+	}
+	labelWidth := width - 4 - 2 // boxRow's border/padding, then "▸ "/"  " prefix
+	if durationCol > 0 {
+		labelWidth -= durationCol + 1 // space before the duration column
+	}
+	if labelWidth < 4 {
+		labelWidth = 4
+	}
+
 	end := min(l.scrollTop+listVisibleRows, len(l.items))
 	lines := make([]string, 0, end-l.scrollTop)
 	for i := l.scrollTop; i < end; i++ {
+		item := l.items[i]
+		label := ansi.Truncate(item.label, labelWidth, "…")
+		label += strings.Repeat(" ", labelWidth-lipgloss.Width(label))
+
+		prefix, labelStyle := "  ", metaStyle
 		if i == l.cursor {
-			lines = append(lines, accentStyle.Render("▸ ")+titleTextStyle.Render(l.items[i].label))
-			continue
+			prefix, labelStyle = accentStyle.Render("▸ "), titleTextStyle
 		}
-		lines = append(lines, "  "+metaStyle.Render(l.items[i].label))
+		line := prefix + labelStyle.Render(label)
+		if durationCol > 0 {
+			dur := strings.Repeat(" ", durationCol-lipgloss.Width(item.duration)) + item.duration
+			line += " " + metaStyle.Render(dur)
+		}
+		lines = append(lines, line)
 	}
 	return lines
 }

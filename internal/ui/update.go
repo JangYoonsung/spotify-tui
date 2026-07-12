@@ -395,7 +395,12 @@ func trackItems(tracks []spotifyapi.Track) []listItem {
 		if len(t.Artists) > 0 {
 			label += " — " + t.Artists[0]
 		}
-		items = append(items, listItem{label: label, id: t.ID, trackURI: "spotify:track:" + t.ID})
+		items = append(items, listItem{
+			label:    label,
+			duration: formatMs(t.DurationMs),
+			id:       t.ID,
+			trackURI: "spotify:track:" + t.ID,
+		})
 	}
 	return items
 }

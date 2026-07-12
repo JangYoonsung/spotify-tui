@@ -16,9 +16,12 @@ const (
 // (used to fetch that playlist's tracks — selecting a playlist always
 // drills into its track list, never plays the whole playlist directly, so
 // there's no "spotify:playlist:<id>" context URI to keep here). Track rows
-// carry trackURI, used to play that specific track.
+// carry trackURI (used to play that specific track) and duration, kept
+// separate from label rather than concatenated so it can be right-aligned
+// to a fixed column instead of trailing wherever the label happens to end.
 type listItem struct {
 	label    string
+	duration string // "" for playlist rows (no per-row duration to show)
 	id       string
 	trackURI string
 }
