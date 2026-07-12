@@ -7,25 +7,37 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// Restrained palette: a single violet accent (141) carries every
-// "active/selected/emphasis" signal (play icon, progress fill, list cursor,
-// selected label), grayscale carries structure/hierarchy (title text >
-// border > meta > footer), and red is reserved for errors only. One
-// consistent accent reads as designed; scattering several hues (the
-// earlier green/red mix) or flattening everything to one gray (the
-// over-corrected monotone pass) both read as less intentional than this.
+// Monochromatic palette: one hue family (green) at three lightness steps
+// carries every "active/emphasis" signal, rather than either a single flat
+// accent or scattered unrelated hues (both tried and rejected earlier —
+// see git history). Grayscale carries plain text hierarchy (title > meta >
+// dim), and red is reserved for errors, the one deliberate non-monotone
+// exception since errors need to interrupt, not blend in.
+//
+//	accentBright (120) — the one thing happening right now: play icon,
+//	                      progress fill, selected row's cursor + label
+//	accentMid    ( 78) — one step down: now-playing box's border, marking
+//	                      it as the primary box among the stack
 var (
+	accentBright = lipgloss.Color("120")
+	accentMid    = lipgloss.Color("78")
+
 	titleTextStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("255")) // track name, selected row label
 	metaStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))            // artist/album, secondary info
 	dimStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))            // least-important text
-	borderStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("238"))            // box lines
 	footerStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 	errorStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
 
-	accentStyle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("141")) // the one accent hue
+	// Two border weights give the stack of boxes a hierarchy: the
+	// now-playing box (the one thing actually happening) reads as primary,
+	// the playlists/tracks/search boxes underneath it as secondary.
+	borderStyle        = lipgloss.NewStyle().Foreground(lipgloss.Color("238")) // secondary boxes
+	borderStylePrimary = lipgloss.NewStyle().Foreground(accentMid)             // now-playing box
+
+	accentStyle  = lipgloss.NewStyle().Bold(true).Foreground(accentBright)
 	playStyle    = accentStyle
 	pauseStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
-	barFillStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("141"))
+	barFillStyle = lipgloss.NewStyle().Foreground(accentBright)
 )
 
 // ---- box-drawing helpers ----
@@ -43,6 +55,20 @@ const (
 )
 
 func boxTop(title, trailing string, width int) string {
+	return boxTopStyled(title, trailing, width, borderStyle)
+}
+func boxBottom(width int) string              { return boxBottomStyled(width, borderStyle) }
+func boxRow(content string, width int) string { return boxRowStyled(content, width, borderStyle) }
+
+func boxTopPrimary(title, trailing string, width int) string {
+	return boxTopStyled(title, trailing, width, borderStylePrimary)
+}
+func boxBottomPrimary(width int) string { return boxBottomStyled(width, borderStylePrimary) }
+func boxRowPrimary(content string, width int) string {
+	return boxRowStyled(content, width, borderStylePrimary)
+}
+
+func boxTopStyled(title, trailing string, width int, style lipgloss.Style) string {
 	inner := width - 2
 	left := boxH + " " + title + " "
 	right := " " + trailing + " " + boxH
@@ -50,14 +76,14 @@ func boxTop(title, trailing string, width int) string {
 	if fill < 0 {
 		fill = 0
 	}
-	return borderStyle.Render(boxTL+left) + strings.Repeat(boxH, fill) + borderStyle.Render(right+boxTR)
+	return style.Render(boxTL+left) + strings.Repeat(boxH, fill) + style.Render(right+boxTR)
 }
 
-func boxBottom(width int) string {
-	return borderStyle.Render(boxBL + strings.Repeat(boxH, width-2) + boxBR)
+func boxBottomStyled(width int, style lipgloss.Style) string {
+	return style.Render(boxBL + strings.Repeat(boxH, width-2) + boxBR)
 }
 
-func boxRow(content string, width int) string {
+func boxRowStyled(content string, width int, style lipgloss.Style) string {
 	inner := width - 4 // "│ " + content + " │"
 	visible := lipgloss.Width(content)
 	if visible > inner {
@@ -68,5 +94,5 @@ func boxRow(content string, width int) string {
 	if pad < 0 {
 		pad = 0
 	}
-	return borderStyle.Render(boxV) + " " + content + strings.Repeat(" ", pad) + " " + borderStyle.Render(boxV)
+	return style.Render(boxV) + " " + content + strings.Repeat(" ", pad) + " " + style.Render(boxV)
 }

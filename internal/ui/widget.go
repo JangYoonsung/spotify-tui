@@ -32,7 +32,7 @@ const defaultWidgetWidth = 56
 //     raw art string is emitted once, completely untouched, as its own
 //     paragraph before the boxed widget — the widget itself renders without
 //     an art column in this mode.
-func renderWidget(state *spotifyapi.PlaybackState, art string, artIsGraphics bool, width int) string {
+func renderWidget(state *spotifyapi.PlaybackState, art string, artIsGraphics bool, width, marqueeTick int) string {
 	if width <= 0 {
 		width = defaultWidgetWidth
 	}
@@ -62,28 +62,28 @@ func renderWidget(state *spotifyapi.PlaybackState, art string, artIsGraphics boo
 	if state != nil && state.IsPlaying {
 		trailing = "playing"
 	}
-	b.WriteString(boxTop("Spotify", trailing, width))
+	b.WriteString(boxTopPrimary("Spotify", trailing, width))
 	b.WriteString("\n")
 
 	if state == nil {
-		b.WriteString(boxRow(dimStyle.Render("nothing playing"), width))
+		b.WriteString(boxRowPrimary(dimStyle.Render("nothing playing"), width))
 		b.WriteString("\n")
 	} else {
 		inlineArt := art
 		if artIsGraphics {
 			inlineArt = "" // already emitted above, unsplit
 		}
-		for _, line := range nowPlayingLines(*state, inlineArt, width) {
-			b.WriteString(boxRow(line, width))
+		for _, line := range nowPlayingLines(*state, inlineArt, width, marqueeTick) {
+			b.WriteString(boxRowPrimary(line, width))
 			b.WriteString("\n")
 		}
 	}
 
-	b.WriteString(boxBottom(width))
+	b.WriteString(boxBottomPrimary(width))
 	return b.String()
 }
 
-func nowPlayingLines(s spotifyapi.PlaybackState, art string, width int) []string {
+func nowPlayingLines(s spotifyapi.PlaybackState, art string, width, marqueeTick int) []string {
 	// progressLine sizes its bar off the width it's given — when art sits
 	// beside the text (JoinHorizontal), the text column is narrower than
 	// the full widget width by the art column plus its spacer, and passing
@@ -96,7 +96,7 @@ func nowPlayingLines(s spotifyapi.PlaybackState, art string, width int) []string
 			textWidth = 20
 		}
 	}
-	text := strings.Join([]string{trackLine(s), progressLine(s, textWidth), statusLine(s), ""}, "\n")
+	text := strings.Join([]string{trackLine(s, textWidth, marqueeTick), progressLine(s, textWidth), statusLine(s), ""}, "\n")
 	if art == "" {
 		return strings.Split(text, "\n")[:3]
 	}
@@ -104,7 +104,7 @@ func nowPlayingLines(s spotifyapi.PlaybackState, art string, width int) []string
 	return strings.Split(joined, "\n")
 }
 
-func trackLine(s spotifyapi.PlaybackState) string {
+func trackLine(s spotifyapi.PlaybackState, width, marqueeTick int) string {
 	icon := pauseStyle.Render("⏸")
 	if s.IsPlaying {
 		icon = playStyle.Render("▶")
@@ -112,7 +112,64 @@ func trackLine(s spotifyapi.PlaybackState) string {
 	if s.Item.Name == "" {
 		return icon + "  " + dimStyle.Render("(no track)")
 	}
-	return icon + "  " + titleTextStyle.Render(s.Item.Name) + metaStyle.Render(" — "+strings.Join(s.Item.Artists, ", "))
+
+	full := s.Item.Name
+	if len(s.Item.Artists) > 0 {
+		full += " — " + strings.Join(s.Item.Artists, ", ")
+	}
+
+	avail := width - lipgloss.Width(icon) - 2 // "  " between icon and text
+	if avail < 1 {
+		avail = 1
+	}
+	if lipgloss.Width(full) <= avail {
+		return icon + "  " + titleTextStyle.Render(full)
+	}
+	// Too long to fit: ping-pong scroll a width-avail window across the
+	// full text, advancing one column per marqueeTick tick.
+	windowed := windowByWidth(full, pingpong(marqueeTick, lipgloss.Width(full)-avail), avail)
+	return icon + "  " + titleTextStyle.Render(windowed)
+}
+
+// pingpong bounces a position back and forth across [0, span] as tick
+// advances — "move side to side" rather than a one-way loop-around.
+func pingpong(tick, span int) int {
+	if span <= 0 {
+		return 0
+	}
+	period := span * 2
+	p := tick % period
+	if p > span {
+		p = period - p
+	}
+	return p
+}
+
+// windowByWidth returns the substring of s starting at visual column
+// startCol and spanning at most width visual columns — rune-based (not
+// byte) and visual-width-aware (not rune-count-aware) so it doesn't split
+// wide characters (e.g. Hangul/CJK track titles) mid-glyph.
+func windowByWidth(s string, startCol, width int) string {
+	runes := []rune(s)
+	col, startIdx := 0, len(runes)
+	for i, r := range runes {
+		if col >= startCol {
+			startIdx = i
+			break
+		}
+		col += lipgloss.Width(string(r))
+	}
+	var b strings.Builder
+	col = 0
+	for _, r := range runes[startIdx:] {
+		w := lipgloss.Width(string(r))
+		if col+w > width {
+			break
+		}
+		b.WriteRune(r)
+		col += w
+	}
+	return b.String()
 }
 
 func progressLine(s spotifyapi.PlaybackState, width int) string {
@@ -133,18 +190,35 @@ func progressLine(s spotifyapi.PlaybackState, width int) string {
 
 func statusLine(s spotifyapi.PlaybackState) string {
 	parts := []string{
-		fmt.Sprintf("Vol %d%%", s.Device.VolumePercent),
+		metaStyle.Render(volumeBar(s.Device.VolumePercent) + fmt.Sprintf(" %d%%", s.Device.VolumePercent)),
 	}
 	if s.ShuffleState {
-		parts = append(parts, "Shuffle on")
+		parts = append(parts, accentStyle.Render("⇄")+metaStyle.Render(" shuffle"))
 	}
-	if s.RepeatState != "" && s.RepeatState != "off" {
-		parts = append(parts, "Repeat "+s.RepeatState)
+	switch s.RepeatState {
+	case "track":
+		parts = append(parts, accentStyle.Render("↻")+metaStyle.Render(" track"))
+	case "context":
+		parts = append(parts, accentStyle.Render("↻")+metaStyle.Render(" all"))
 	}
 	if s.Device.Name != "" {
-		parts = append(parts, s.Device.Name)
+		parts = append(parts, metaStyle.Render(s.Device.Name))
 	}
-	return metaStyle.Render(strings.Join(parts, "  ·  "))
+	return strings.Join(parts, metaStyle.Render("  ·  "))
+}
+
+// volumeBar renders volume as a 5-segment bar rather than just a number —
+// a quick-glance shape reads faster than parsing digits.
+func volumeBar(pct int) string {
+	const segments = 5
+	filled := (pct*segments + 50) / 100
+	if filled > segments {
+		filled = segments
+	}
+	if filled < 0 {
+		filled = 0
+	}
+	return accentStyle.Render(strings.Repeat("▮", filled)) + dimStyle.Render(strings.Repeat("▯", segments-filled))
 }
 
 func formatMs(ms int) string {

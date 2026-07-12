@@ -67,11 +67,11 @@ func listTrailing(l listState) string {
 func renderListRows(l listState) []string {
 	switch {
 	case l.loading:
-		return []string{dimStyle.Render("loading...")}
+		return []string{dimStyle.Render("⠋ loading…")}
 	case l.err != nil:
-		return []string{errorStyle.Render(l.err.Error())}
+		return []string{errorStyle.Render("⚠ " + l.err.Error())}
 	case len(l.items) == 0:
-		return []string{dimStyle.Render("no results")}
+		return []string{dimStyle.Render("· no results")}
 	}
 
 	end := min(l.scrollTop+listVisibleRows, len(l.items))

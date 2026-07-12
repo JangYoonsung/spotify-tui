@@ -14,7 +14,7 @@ func (m Model) View() string {
 	case screenSearch:
 		b.WriteString(renderSearchScreen(m, width))
 	default:
-		b.WriteString(renderWidget(m.state, m.artRendered, m.cfg.ExperimentalKittyArt, width))
+		b.WriteString(renderWidget(m.state, m.artRendered, m.cfg.ExperimentalKittyArt, width, m.marqueeTick))
 		b.WriteString("\n")
 		b.WriteString(renderPlaylistsBox(m.playlists, width))
 		if m.playlistTracksTitle != "" {
@@ -25,7 +25,7 @@ func (m Model) View() string {
 	b.WriteString("\n")
 
 	if m.lastErr != nil {
-		b.WriteString(errorStyle.Render("error: " + m.lastErr.Error()))
+		b.WriteString(errorStyle.Render("⚠ " + m.lastErr.Error()))
 		b.WriteString("\n")
 	}
 

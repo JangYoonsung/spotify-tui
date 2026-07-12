@@ -13,6 +13,14 @@ import (
 
 type tickMsg time.Time
 
+type marqueeTickMsg time.Time
+
+const marqueeInterval = 400 * time.Millisecond
+
+func marqueeTickCmd() tea.Cmd {
+	return tea.Tick(marqueeInterval, func(t time.Time) tea.Msg { return marqueeTickMsg(t) })
+}
+
 type refreshResultMsg struct {
 	state *spotifyapi.PlaybackState
 	err   error
@@ -109,11 +117,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, tickCmd(m.cfg.PollInterval))
 		return m, tea.Batch(cmds...)
 
+	case marqueeTickMsg:
+		m.marqueeTick++
+		return m, marqueeTickCmd()
+
 	case refreshResultMsg:
 		m.lastRefresh = time.Now()
 		m.lastErr = msg.err
 		if msg.err != nil {
 			return m, nil
+		}
+		if msg.state != nil && (m.state == nil || msg.state.Item.ID != m.state.Item.ID) {
+			m.marqueeTick = 0
 		}
 		m.state = msg.state
 		if msg.state != nil && msg.state.Item.ID != "" && msg.state.Item.ID != m.artTrackID {

@@ -35,6 +35,12 @@ type Model struct {
 	artTrackID  string
 	artRendered string
 
+	// marqueeTick drives the ping-pong scroll for a track title too long
+	// to fit — advanced by its own fast ticker (marqueeTickCmd), decoupled
+	// from the 3s data-poll ticker so the scroll motion stays smooth
+	// regardless of --poll-interval. Reset to 0 whenever the track changes.
+	marqueeTick int
+
 	width, height int
 }
 
@@ -51,5 +57,5 @@ func New(client *spotifyapi.Client, cfg config.Config) Model {
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(refreshCmd(m.client), playlistsCmd(m.client), tickCmd(m.cfg.PollInterval))
+	return tea.Batch(refreshCmd(m.client), playlistsCmd(m.client), tickCmd(m.cfg.PollInterval), marqueeTickCmd())
 }

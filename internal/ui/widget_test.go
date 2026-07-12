@@ -33,7 +33,7 @@ func TestNowPlayingLinesNoArt(t *testing.T) {
 		ProgressMs: 50000,
 		Device:     spotifyapi.Device{Name: "Dev", VolumePercent: 50},
 	}
-	lines := nowPlayingLines(s, "", 56)
+	lines := nowPlayingLines(s, "", 56, 0)
 	if len(lines) != 3 {
 		t.Fatalf("got %d lines, want 3 (no art -> track/progress/status only)", len(lines))
 	}
@@ -50,7 +50,7 @@ func TestNowPlayingLinesWithArt(t *testing.T) {
 		ProgressMs: 0,
 	}
 	art := strings.Join([]string{"AAAA", "BBBB", "CCCC", "DDDD"}, "\n")
-	lines := nowPlayingLines(s, art, 56)
+	lines := nowPlayingLines(s, art, 56, 0)
 	if len(lines) != 4 {
 		t.Fatalf("got %d lines, want 4 (matches art row count)", len(lines))
 	}
@@ -61,6 +61,74 @@ func TestNowPlayingLinesWithArt(t *testing.T) {
 	}
 	if !strings.Contains(lines[0], "AAAA") {
 		t.Fatalf("first line missing art content: %q", lines[0])
+	}
+}
+
+func TestNowPlayingLinesWithArtColumnWidth(t *testing.T) {
+	// A 4-char art string (the previous test's fixture) is narrower than
+	// the progress bar's own minimum width, so it couldn't catch the bug
+	// where progressLine sized its bar off the full widget width instead
+	// of the narrower text column beside a realistically-sized art block —
+	// the bar overflowed boxRow's inner width and silently truncated the
+	// trailing timestamp. Use a realistic artCols-wide art block instead.
+	s := spotifyapi.PlaybackState{
+		Item:       spotifyapi.Track{Name: "Song", DurationMs: 200000},
+		ProgressMs: 100000,
+	}
+	artLine := strings.Repeat("█", artCols)
+	art := strings.Join([]string{artLine, artLine, artLine, artLine, artLine, artLine}, "\n")
+	width := 56
+	lines := nowPlayingLines(s, art, width, 0)
+	for _, l := range lines {
+		if w := lipgloss.Width(l); w > width-4 {
+			t.Fatalf("line exceeds boxRow inner width (%d): width=%d line=%q", width-4, w, l)
+		}
+	}
+	// The progress line (index 1) must still show the full "m:ss/m:ss"
+	// timestamp, not have it truncated off the end.
+	if !strings.Contains(lines[1], "1:40/3:20") {
+		t.Fatalf("progress line missing timestamp, likely truncated: %q", lines[1])
+	}
+}
+
+func TestPingpong(t *testing.T) {
+	cases := []struct {
+		tick, span, want int
+	}{
+		{0, 0, 0}, // no overflow: always 0
+		{5, 0, 0},
+		{0, 4, 0}, // start at 0
+		{4, 4, 4}, // reaches the far end...
+		{5, 4, 3}, // ...then bounces back
+		{8, 4, 0}, // back to start
+		{9, 4, 1}, // and forward again
+	}
+	for _, tc := range cases {
+		if got := pingpong(tc.tick, tc.span); got != tc.want {
+			t.Errorf("pingpong(%d, %d) = %d, want %d", tc.tick, tc.span, got, tc.want)
+		}
+	}
+}
+
+func TestWindowByWidth(t *testing.T) {
+	cases := []struct {
+		name            string
+		s               string
+		startCol, width int
+		want            string
+	}{
+		{"ascii from start", "hello world", 0, 5, "hello"},
+		{"ascii mid-window", "hello world", 6, 5, "world"},
+		{"width longer than remaining", "hello", 2, 10, "llo"},
+		{"CJK not split mid-glyph", "가나다라마", 0, 4, "가나"}, // each Hangul syllable is 2 cells wide
+		{"CJK offset window", "가나다라마", 4, 4, "다라"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := windowByWidth(tc.s, tc.startCol, tc.width); got != tc.want {
+				t.Errorf("windowByWidth(%q, %d, %d) = %q, want %q", tc.s, tc.startCol, tc.width, got, tc.want)
+			}
+		})
 	}
 }
 
