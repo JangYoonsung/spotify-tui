@@ -71,6 +71,8 @@ spotify-tui --experimental-kitty-art  # real Kitty/Sixel/iTerm2 image instead of
 | `/`              | open search (type a query, `enter` to search, then `↑↓`/`enter` to play a result) |
 | `d`              | open the device list; `enter` switches playback to the selected device            |
 | `a`              | in search results or a tracks list: add the selected track to the queue           |
+| `f`              | fuzzy-filter the focused list (type to narrow, `enter` accept, `esc` clear)       |
+| `?`              | toggle the expanded key help                                                      |
 | `R`              | force refresh (playback state + playlists)                                        |
 | `q` / `ctrl+c`   | quit                                                                              |
 

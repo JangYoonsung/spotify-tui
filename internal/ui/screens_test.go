@@ -4,63 +4,37 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/bubbles/list"
+
 	"github.com/jangyoonsung/spotify-tui-go/internal/spotifyapi"
 )
 
-func TestListStateMoveCursor(t *testing.T) {
-	mk := func(n int) listState {
-		items := make([]listItem, n)
-		return listState{items: items}
+func TestListStateSelection(t *testing.T) {
+	l := newListState()
+	l.setItems([]list.Item{
+		listItem{label: "a", id: "1"},
+		listItem{label: "b", id: "2"},
+		listItem{label: "c", id: "3"},
+	})
+
+	if it, ok := l.selected(); !ok || it.id != "1" {
+		t.Fatalf("selected() after setItems = (%+v, %v), want first item", it, ok)
 	}
 
-	t.Run("empty list is a no-op", func(t *testing.T) {
-		l := mk(0)
-		l.moveCursor(1)
-		if l.cursor != 0 {
-			t.Fatalf("cursor = %d, want 0", l.cursor)
-		}
-	})
+	l.selectID("3")
+	if it, _ := l.selected(); it.id != "3" {
+		t.Fatalf("selectID(3): selected = %q, want 3", it.id)
+	}
 
-	t.Run("clamped at zero", func(t *testing.T) {
-		l := mk(5)
-		l.moveCursor(-3)
-		if l.cursor != 0 {
-			t.Fatalf("cursor = %d, want 0", l.cursor)
-		}
-	})
+	l.selectID("missing") // unknown id: cursor must not move
+	if it, _ := l.selected(); it.id != "3" {
+		t.Fatalf("selectID(missing) moved the cursor to %q", it.id)
+	}
 
-	t.Run("clamped at len-1", func(t *testing.T) {
-		l := mk(3)
-		l.moveCursor(10)
-		if l.cursor != 2 {
-			t.Fatalf("cursor = %d, want 2", l.cursor)
-		}
-	})
-
-	t.Run("scrollTop follows cursor past the visible window", func(t *testing.T) {
-		l := mk(20)
-		for i := 0; i < 12; i++ {
-			l.moveCursor(1)
-		}
-		if l.cursor != 12 {
-			t.Fatalf("cursor = %d, want 12", l.cursor)
-		}
-		if l.scrollTop != l.cursor-listVisibleRows+1 {
-			t.Fatalf("scrollTop = %d, want %d", l.scrollTop, l.cursor-listVisibleRows+1)
-		}
-	})
-
-	t.Run("scrollTop follows cursor moving back up", func(t *testing.T) {
-		l := mk(20)
-		l.cursor, l.scrollTop = 15, 8
-		l.moveCursor(-10)
-		if l.cursor != 5 {
-			t.Fatalf("cursor = %d, want 5", l.cursor)
-		}
-		if l.scrollTop != 5 {
-			t.Fatalf("scrollTop = %d, want 5 (cursor moved above old scrollTop)", l.scrollTop)
-		}
-	})
+	empty := newListState()
+	if _, ok := empty.selected(); ok {
+		t.Fatalf("selected() on an empty list must return ok=false")
+	}
 }
 
 func TestDeviceItems(t *testing.T) {
@@ -72,29 +46,17 @@ func TestDeviceItems(t *testing.T) {
 	if len(items) != 2 {
 		t.Fatalf("got %d items, want 2", len(items))
 	}
-	if items[0].id != "dev1" || items[1].id != "dev2" {
+	first, second := items[0].(listItem), items[1].(listItem)
+	if first.id != "dev1" || second.id != "dev2" {
 		t.Fatalf("ids not preserved: %+v", items)
 	}
-	if !strings.Contains(items[0].label, "active") {
-		t.Fatalf("active device label missing marker: %q", items[0].label)
+	if !strings.Contains(first.label, "active") {
+		t.Fatalf("active device label missing marker: %q", first.label)
 	}
-	if strings.Contains(items[1].label, "active") {
-		t.Fatalf("inactive device label wrongly marked active: %q", items[1].label)
+	if strings.Contains(second.label, "active") {
+		t.Fatalf("inactive device label wrongly marked active: %q", second.label)
 	}
-	if items[0].trackURI != "" {
-		t.Fatalf("device rows must have no trackURI (queue-add guard relies on it): %q", items[0].trackURI)
-	}
-}
-
-func TestListStateSelected(t *testing.T) {
-	l := listState{items: []listItem{{label: "a"}, {label: "b"}}, cursor: 1}
-	item, ok := l.selected()
-	if !ok || item.label != "b" {
-		t.Fatalf("selected() = (%+v, %v), want (b, true)", item, ok)
-	}
-
-	empty := listState{}
-	if _, ok := empty.selected(); ok {
-		t.Fatalf("selected() on empty list should return ok=false")
+	if first.trackURI != "" {
+		t.Fatalf("device rows must have no trackURI (queue-add guard relies on it): %q", first.trackURI)
 	}
 }

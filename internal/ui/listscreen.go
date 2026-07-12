@@ -4,17 +4,16 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 )
 
 // renderPlaylistsBox draws the always-visible playlists list under the
 // now-playing box (screenNowPlaying) — no key needed to reveal it.
-func renderPlaylistsBox(l listState, width int) string {
+func renderPlaylistsBox(l listState, width int, spin string) string {
 	var b strings.Builder
 	b.WriteString(boxTop("Playlists", listTrailing(l), width))
 	b.WriteString("\n")
-	for _, line := range renderListRows(l, width) {
+	for _, line := range renderListRows(l, width, spin) {
 		b.WriteString(boxRow(line, width))
 		b.WriteString("\n")
 	}
@@ -31,7 +30,7 @@ func renderSearchScreen(m Model, width int) string {
 		b.WriteString(boxRow(m.searchInput.View(), width))
 		b.WriteString("\n")
 	}
-	for _, line := range renderListRows(m.search, width) {
+	for _, line := range renderListRows(m.search, width, m.spin.View()) {
 		b.WriteString(boxRow(line, width))
 		b.WriteString("\n")
 	}
@@ -45,7 +44,7 @@ func renderDevicesScreen(m Model, width int) string {
 	var b strings.Builder
 	b.WriteString(boxTop("Devices", listTrailing(m.devices), width))
 	b.WriteString("\n")
-	for _, line := range renderListRows(m.devices, width) {
+	for _, line := range renderListRows(m.devices, width, m.spin.View()) {
 		b.WriteString(boxRow(line, width))
 		b.WriteString("\n")
 	}
@@ -65,7 +64,7 @@ func renderPlaylistTracksBox(m Model, width int) string {
 	var b strings.Builder
 	b.WriteString(boxTop(title, listTrailing(m.playlistTracks), width))
 	b.WriteString("\n")
-	for _, line := range renderListRows(m.playlistTracks, width) {
+	for _, line := range renderListRows(m.playlistTracks, width, m.spin.View()) {
 		b.WriteString(boxRow(line, width))
 		b.WriteString("\n")
 	}
@@ -74,57 +73,43 @@ func renderPlaylistTracksBox(m Model, width int) string {
 }
 
 func listTrailing(l listState) string {
-	if len(l.items) == 0 {
+	total := len(l.list.VisibleItems())
+	if total == 0 {
 		return "0"
 	}
-	return fmt.Sprintf("%d/%d", l.cursor+1, len(l.items))
+	return fmt.Sprintf("%d/%d", l.list.Index()+1, total)
 }
 
-func renderListRows(l listState, width int) []string {
+// renderListRows draws the fetch lifecycle states itself (bubbles/list has
+// no loading/error concept), then defers to list.View() — which renders the
+// filter input inline while filtering — and re-wraps its lines in boxRow.
+func renderListRows(l listState, width int, spin string) []string {
 	switch {
 	case l.loading:
-		return []string{dimStyle.Render("⠋ loading…")}
+		return []string{spin + dimStyle.Render(" loading…")}
 	case l.err != nil:
 		return []string{errorStyle.Render("⚠ " + l.err.Error())}
-	case len(l.items) == 0:
+	case len(l.list.Items()) == 0:
 		return []string{dimStyle.Render("· no results")}
 	}
-
-	// Right-align duration to a fixed column (rather than trailing wherever
-	// each row's label happens to end) so the whole list reads as a table,
-	// not ragged text — measured from the widest duration actually present
-	// so playlist rows (no duration at all) don't reserve dead space.
-	durationCol := 0
-	for _, it := range l.items {
-		if w := lipgloss.Width(it.duration); w > durationCol {
-			durationCol = w
-		}
+	// list.View() pads its output to the full configured height (blank rows
+	// below the items) and emits a leading blank line for the hidden title
+	// bar. Boxed at face value, each list became a 14-line box regardless of
+	// content — two of those overflow a small dock terminal and the frame
+	// gets cropped into visual garbage. Trim blank edge lines so the box
+	// hugs its content again; the filter input line, when present, is
+	// non-blank and survives.
+	lines := strings.Split(l.list.View(), "\n")
+	start, end := 0, len(lines)
+	for start < end && strings.TrimSpace(ansi.Strip(lines[start])) == "" {
+		start++
 	}
-	labelWidth := width - 4 - 2 // boxRow's border/padding, then "▸ "/"  " prefix
-	if durationCol > 0 {
-		labelWidth -= durationCol + 1 // space before the duration column
+	for end > start && strings.TrimSpace(ansi.Strip(lines[end-1])) == "" {
+		end--
 	}
-	if labelWidth < 4 {
-		labelWidth = 4
+	if start == end {
+		// Every line blank — e.g. a filter that matches nothing.
+		return []string{dimStyle.Render("· no matches")}
 	}
-
-	end := min(l.scrollTop+listVisibleRows, len(l.items))
-	lines := make([]string, 0, end-l.scrollTop)
-	for i := l.scrollTop; i < end; i++ {
-		item := l.items[i]
-		label := ansi.Truncate(item.label, labelWidth, "…")
-		label += strings.Repeat(" ", labelWidth-lipgloss.Width(label))
-
-		prefix, labelStyle := "  ", metaStyle
-		if i == l.cursor {
-			prefix, labelStyle = accentStyle.Render("▸ "), titleTextStyle
-		}
-		line := prefix + labelStyle.Render(label)
-		if durationCol > 0 {
-			dur := strings.Repeat(" ", durationCol-lipgloss.Width(item.duration)) + item.duration
-			line += " " + metaStyle.Render(dur)
-		}
-		lines = append(lines, line)
-	}
-	return lines
+	return lines[start:end]
 }

@@ -3,6 +3,8 @@ package ui
 import (
 	"time"
 
+	"github.com/charmbracelet/bubbles/help"
+	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -24,6 +26,13 @@ type Model struct {
 	searchInput textinput.Model
 	playlists   listState
 	devices     listState
+	// spin animates the "loading…" rows. Its ticker is gated: armed whenever
+	// a fetch flips some listState.loading on, and dropped (not re-armed) by
+	// spinner.TickMsg once nothing is loading anymore.
+	spin spinner.Model
+	// helpView renders the footer from the active screen's key bindings
+	// (keysFor) — ? toggles the expanded view.
+	helpView help.Model
 
 	playlistTracks      listState
 	playlistTracksTitle string
@@ -63,10 +72,26 @@ func New(client *spotifyapi.Client, cfg config.Config) Model {
 	ti.Placeholder = "search tracks..."
 	ti.CharLimit = 100
 
+	hv := help.New()
+	hv.Styles.ShortKey = metaStyle
+	hv.Styles.ShortDesc = footerStyle
+	hv.Styles.ShortSeparator = dimStyle
+	hv.Styles.FullKey = metaStyle
+	hv.Styles.FullDesc = footerStyle
+	hv.Styles.FullSeparator = dimStyle
+
 	m := Model{
 		client:      client,
 		cfg:         cfg,
 		searchInput: ti,
+		helpView:    hv,
+		spin:        spinner.New(spinner.WithSpinner(spinner.MiniDot), spinner.WithStyle(dimStyle)),
+		// Playlists start fetching in Init — show the spinner from frame one
+		// instead of a misleading "no results" until the first response.
+		playlists:      loadingListState(),
+		playlistTracks: newListState(),
+		search:         newListState(),
+		devices:        newListState(),
 	}
 
 	if st := config.LoadUIState(); st.LastPlaylistID != "" {
@@ -74,7 +99,7 @@ func New(client *spotifyapi.Client, cfg config.Config) Model {
 		m.restoreTrackID = st.LastTrackID
 		m.currentPlaylistID = st.LastPlaylistID
 		m.playlistTracksTitle = st.LastPlaylistName
-		m.playlistTracks = listState{loading: true}
+		m.playlistTracks = loadingListState()
 		// Focus the restored tracks box, matching the state the user quit in
 		// (they had a playlist open): up/down/enter pick a track right away.
 		// Esc hands focus back to the playlists box as usual.
@@ -84,7 +109,7 @@ func New(client *spotifyapi.Client, cfg config.Config) Model {
 }
 
 func (m Model) Init() tea.Cmd {
-	cmds := []tea.Cmd{refreshCmd(m.client), playlistsCmd(m.client), tickCmd(m.cfg.PollInterval), marqueeTickCmd()}
+	cmds := []tea.Cmd{refreshCmd(m.client), playlistsCmd(m.client), tickCmd(m.cfg.PollInterval), marqueeTickCmd(), m.spin.Tick}
 	if m.restorePlaylistID != "" {
 		cmds = append(cmds, playlistTracksCmd(m.client, m.restorePlaylistID))
 	}

@@ -5,6 +5,8 @@ import (
 	"time"
 
 	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/list"
+	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/jangyoonsung/spotify-tui-go/internal/albumart"
@@ -120,6 +122,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
+		w := m.width
+		if w <= 0 || w > 90 {
+			w = defaultWidgetWidth
+		}
+		for _, l := range []*listState{&m.playlists, &m.playlistTracks, &m.search, &m.devices} {
+			l.list.SetSize(w-4, listVisibleRows) // boxRow reserves 4 cols of border/padding
+		}
 		return m, nil
 
 	case tickMsg:
@@ -133,6 +142,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case marqueeTickMsg:
 		m.marqueeTick++
 		return m, marqueeTickCmd()
+
+	case spinner.TickMsg:
+		if !m.anyListLoading() {
+			// Nothing loading: drop the ticker instead of re-arming it. The
+			// next fetch re-arms via m.spin.Tick alongside its command.
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.spin, cmd = m.spin.Update(msg)
+		return m, cmd
 
 	case refreshResultMsg:
 		m.lastRefresh = time.Now()
@@ -201,16 +220,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// the previous run, if any.
 				prevID = m.restorePlaylistID
 			}
-			m.playlists.items = playlistItems(msg.playlists)
-			m.playlists.cursor, m.playlists.scrollTop = 0, 0
-			if prevID != "" {
-				for i, it := range m.playlists.items {
-					if it.id == prevID {
-						m.playlists.cursor = i
-						break
-					}
-				}
-			}
+			m.playlists.setItems(playlistItems(msg.playlists))
+			m.playlists.selectID(prevID)
 		}
 		return m, nil
 
@@ -218,22 +229,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.playlistTracks.loading = false
 		m.playlistTracks.err = msg.err
 		if msg.err == nil {
-			m.playlistTracks.items = trackItems(msg.tracks)
-			m.playlistTracks.cursor, m.playlistTracks.scrollTop = 0, 0
-			if m.restoreTrackID != "" {
-				for i, it := range m.playlistTracks.items {
-					if it.id == m.restoreTrackID {
-						m.playlistTracks.cursor = i
-						if i >= listVisibleRows {
-							m.playlistTracks.scrollTop = i - listVisibleRows + 1
-						}
-						break
-					}
-				}
-				// One-shot: only the restart restore — playlists opened later
-				// (or a re-fetch) start at the top as usual.
-				m.restoreTrackID = ""
-			}
+			m.playlistTracks.setItems(trackItems(msg.tracks))
+			// One-shot: only the restart restore — playlists opened later
+			// (or a re-fetch) start at the top as usual.
+			m.playlistTracks.selectID(m.restoreTrackID)
+			m.restoreTrackID = ""
 		}
 		return m, nil
 
@@ -241,8 +241,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.search.loading = false
 		m.search.err = msg.err
 		if msg.err == nil {
-			m.search.items = trackItems(msg.tracks)
-			m.search.cursor, m.search.scrollTop = 0, 0
+			m.search.setItems(trackItems(msg.tracks))
 		}
 		return m, nil
 
@@ -250,16 +249,43 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.devices.loading = false
 		m.devices.err = msg.err
 		if msg.err == nil {
-			m.devices.items = deviceItems(msg.devices)
-			m.devices.cursor, m.devices.scrollTop = 0, 0
+			m.devices.setItems(deviceItems(msg.devices))
 		}
 		return m, nil
+
+	case list.FilterMatchesMsg:
+		// bubbles/list computes fuzzy-filter matches asynchronously: typing
+		// returns a cmd whose FilterMatchesMsg must be fed back into the
+		// list, or the visible items never actually narrow.
+		al := m.activeList()
+		var cmd tea.Cmd
+		al.list, cmd = al.list.Update(msg)
+		return m, cmd
 
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 	}
 
 	return m, nil
+}
+
+func (m Model) anyListLoading() bool {
+	return m.playlists.loading || m.playlistTracks.loading || m.search.loading || m.devices.loading
+}
+
+// activeList returns whichever list keyboard input currently targets.
+func (m *Model) activeList() *listState {
+	switch m.screen {
+	case screenSearch:
+		return &m.search
+	case screenDevices:
+		return &m.devices
+	default:
+		if m.focusTracks {
+			return &m.playlistTracks
+		}
+		return &m.playlists
+	}
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -269,10 +295,22 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.screen == screenSearch && m.searchInput.Focused() {
 		return m.handleSearchTypingKey(msg)
 	}
+	// Same rule while typing into a list's fuzzy filter (bound to "f"):
+	// bubbles/list owns every keystroke until the filter is accepted/canceled.
+	if al := m.activeList(); al.list.FilterState() == list.Filtering {
+		var cmd tea.Cmd
+		al.list, cmd = al.list.Update(msg)
+		return m, cmd
+	}
 
 	switch {
 	case key.Matches(msg, keys.Quit):
 		return m, tea.Quit
+	case key.Matches(msg, keys.Escape) && m.activeList().list.FilterState() == list.FilterApplied:
+		// First esc clears an applied filter; the next one backs out of the
+		// screen/focus as usual.
+		m.activeList().list.ResetFilter()
+		return m, nil
 	case key.Matches(msg, keys.Escape) && m.screen == screenNowPlaying && m.focusTracks:
 		// Tracks box stays visible either way — Esc just hands keyboard
 		// focus back to the playlists box, no screen change involved.
@@ -283,15 +321,18 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case key.Matches(msg, keys.Search) && m.screen == screenNowPlaying:
 		m.screen = screenSearch
-		m.search = listState{}
+		m.search = newListState()
 		m.searchInput.Reset()
 		return m, m.searchInput.Focus()
 	case key.Matches(msg, keys.Devices) && m.screen == screenNowPlaying:
 		m.screen = screenDevices
-		m.devices = listState{loading: true}
-		return m, devicesCmd(m.client)
+		m.devices = loadingListState()
+		return m, tea.Batch(devicesCmd(m.client), m.spin.Tick)
 	case key.Matches(msg, keys.Refresh):
 		return m, tea.Batch(refreshCmd(m.client), playlistsCmd(m.client))
+	case key.Matches(msg, keys.Help):
+		m.helpView.ShowAll = !m.helpView.ShowAll
+		return m, nil
 	}
 
 	switch m.screen {
@@ -311,12 +352,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m Model) handleNowPlayingKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.focusTracks {
 		switch {
-		case key.Matches(msg, keys.Up):
-			m.playlistTracks.moveCursor(-1)
-			return m, nil
-		case key.Matches(msg, keys.Down):
-			m.playlistTracks.moveCursor(1)
-			return m, nil
+		case listNavMatches(m.playlistTracks.list, msg):
+			var cmd tea.Cmd
+			m.playlistTracks.list, cmd = m.playlistTracks.list.Update(msg)
+			return m, cmd
 		case key.Matches(msg, keys.Enter):
 			item, ok := m.playlistTracks.selected()
 			if !ok {
@@ -341,12 +380,10 @@ func (m Model) handleNowPlayingKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	} else {
 		switch {
-		case key.Matches(msg, keys.Up):
-			m.playlists.moveCursor(-1)
-			return m, nil
-		case key.Matches(msg, keys.Down):
-			m.playlists.moveCursor(1)
-			return m, nil
+		case listNavMatches(m.playlists.list, msg):
+			var cmd tea.Cmd
+			m.playlists.list, cmd = m.playlists.list.Update(msg)
+			return m, cmd
 		case key.Matches(msg, keys.PlayPlaylist):
 			item, ok := m.playlists.selected()
 			if !ok {
@@ -356,18 +393,18 @@ func (m Model) handleNowPlayingKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			// same open-and-focus behavior as enter, plus playback.
 			m.actionInFlight = true
 			m.focusTracks = true
-			m.playlistTracks = listState{loading: true}
+			m.playlistTracks = loadingListState()
 			m.playlistTracksTitle = item.label
 			m.currentPlaylistID = item.id
 			_ = config.SaveUIState(config.UIState{LastPlaylistID: item.id, LastPlaylistName: item.label})
-			return m, tea.Batch(m.playContextSelection(item), playlistTracksCmd(m.client, item.id))
+			return m, tea.Batch(m.playContextSelection(item), playlistTracksCmd(m.client, item.id), m.spin.Tick)
 		case key.Matches(msg, keys.Enter):
 			item, ok := m.playlists.selected()
 			if !ok {
 				return m, nil
 			}
 			m.focusTracks = true
-			m.playlistTracks = listState{loading: true}
+			m.playlistTracks = loadingListState()
 			m.playlistTracksTitle = item.label
 			m.currentPlaylistID = item.id
 			// Best-effort persist so the tracks box survives a restart (the
@@ -375,7 +412,7 @@ func (m Model) handleNowPlayingKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			// write only costs the convenience, not worth surfacing. No
 			// LastTrackID: picking a playlist starts its tracks at the top.
 			_ = config.SaveUIState(config.UIState{LastPlaylistID: item.id, LastPlaylistName: item.label})
-			return m, playlistTracksCmd(m.client, item.id)
+			return m, tea.Batch(playlistTracksCmd(m.client, item.id), m.spin.Tick)
 		}
 	}
 
@@ -401,29 +438,23 @@ func (m Model) handleSearchTypingKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.search.loading = true
-		return m, searchCmd(m.client, query)
+		return m, tea.Batch(searchCmd(m.client, query), m.spin.Tick)
 	}
 	var cmd tea.Cmd
 	m.searchInput, cmd = m.searchInput.Update(msg)
 	return m, cmd
 }
 
-// handleListKey drives cursor movement and selection for the browsing part
-// of Search/PlaylistTracks screens (once the search box, if any, isn't
-// focused).
-func (m Model) handleListKey(list *listState, msg tea.KeyMsg, play func(listItem) tea.Cmd) (tea.Model, tea.Cmd) {
+// handleListKey drives selection for the Search/Devices screens: enter and
+// queue-add are this app's actions, everything else (cursor movement,
+// paging, "f" fuzzy filter) is delegated to bubbles/list.
+func (m Model) handleListKey(l *listState, msg tea.KeyMsg, play func(listItem) tea.Cmd) (tea.Model, tea.Cmd) {
 	switch {
-	case key.Matches(msg, keys.Up):
-		list.moveCursor(-1)
-		return m, nil
-	case key.Matches(msg, keys.Down):
-		list.moveCursor(1)
-		return m, nil
 	case key.Matches(msg, keys.Search) && m.screen == screenSearch:
 		m.searchInput.Reset()
 		return m, m.searchInput.Focus()
 	case key.Matches(msg, keys.Enter):
-		item, ok := list.selected()
+		item, ok := l.selected()
 		if !ok {
 			return m, nil
 		}
@@ -431,7 +462,7 @@ func (m Model) handleListKey(list *listState, msg tea.KeyMsg, play func(listItem
 		m.actionInFlight = true
 		return m, play(item)
 	case key.Matches(msg, keys.QueueAdd):
-		item, ok := list.selected()
+		item, ok := l.selected()
 		if !ok || item.trackURI == "" {
 			// Device rows have no trackURI — queueing is track-only.
 			return m, nil
@@ -440,7 +471,9 @@ func (m Model) handleListKey(list *listState, msg tea.KeyMsg, play func(listItem
 		m.actionInFlight = true
 		return m, m.queueTrack(item)
 	}
-	return m, nil
+	var cmd tea.Cmd
+	l.list, cmd = l.list.Update(msg)
+	return m, cmd
 }
 
 // queueTrack appends the selected track to the active device's queue —
@@ -531,8 +564,8 @@ func (m Model) playContextSelection(item listItem) tea.Cmd {
 	})
 }
 
-func trackItems(tracks []spotifyapi.Track) []listItem {
-	items := make([]listItem, 0, len(tracks))
+func trackItems(tracks []spotifyapi.Track) []list.Item {
+	items := make([]list.Item, 0, len(tracks))
 	for _, t := range tracks {
 		label := t.Name
 		if len(t.Artists) > 0 {
@@ -548,8 +581,8 @@ func trackItems(tracks []spotifyapi.Track) []listItem {
 	return items
 }
 
-func deviceItems(devices []spotifyapi.Device) []listItem {
-	items := make([]listItem, 0, len(devices))
+func deviceItems(devices []spotifyapi.Device) []list.Item {
+	items := make([]list.Item, 0, len(devices))
 	for _, d := range devices {
 		label := d.Name
 		if d.Type != "" {
@@ -563,8 +596,8 @@ func deviceItems(devices []spotifyapi.Device) []listItem {
 	return items
 }
 
-func playlistItems(playlists []spotifyapi.Playlist) []listItem {
-	items := make([]listItem, 0, len(playlists))
+func playlistItems(playlists []spotifyapi.Playlist) []list.Item {
+	items := make([]list.Item, 0, len(playlists))
 	for _, p := range playlists {
 		// TracksTotal isn't shown: Spotify's Feb 2026 API migration made
 		// GET /me/playlists return a null "tracks" field (confirmed via

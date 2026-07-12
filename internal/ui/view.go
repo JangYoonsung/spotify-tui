@@ -21,7 +21,7 @@ func (m Model) View() string {
 	default:
 		b.WriteString(renderWidget(interpolatedState(m.state, m.lastRefresh, time.Now()), m.artRendered, m.cfg.ExperimentalKittyArt, width, m.marqueeTick))
 		b.WriteString("\n")
-		b.WriteString(renderPlaylistsBox(m.playlists, width))
+		b.WriteString(renderPlaylistsBox(m.playlists, width, m.spin.View()))
 		if m.playlistTracksTitle != "" {
 			b.WriteString("\n")
 			b.WriteString(renderPlaylistTracksBox(m, width))
@@ -34,6 +34,8 @@ func (m Model) View() string {
 		b.WriteString("\n")
 	}
 
-	b.WriteString(helpLine(m.screen, m.focusTracks))
+	hv := m.helpView
+	hv.Width = width
+	b.WriteString(hv.View(keysFor(m.screen, m.focusTracks)))
 	return b.String()
 }
