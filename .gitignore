@@ -1,0 +1,4 @@
+.tokensave/*
+/bin/
+.env
+.claude/
