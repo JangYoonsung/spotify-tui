@@ -40,6 +40,19 @@ func renderSearchScreen(m Model, width int) string {
 	return b.String()
 }
 
+// renderDevicesScreen lists Spotify Connect devices for playback transfer.
+func renderDevicesScreen(m Model, width int) string {
+	var b strings.Builder
+	b.WriteString(boxTop("Devices", listTrailing(m.devices), width))
+	b.WriteString("\n")
+	for _, line := range renderListRows(m.devices, width) {
+		b.WriteString(boxRow(line, width))
+		b.WriteString("\n")
+	}
+	b.WriteString(boxBottom(width))
+	return b.String()
+}
+
 // renderPlaylistTracksBox draws the selected playlist's tracks — inline on
 // the main screen underneath the playlists box, not a separate screen.
 // Only rendered once the user has picked a playlist at least once

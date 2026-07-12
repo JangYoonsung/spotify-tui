@@ -13,6 +13,8 @@ func (m Model) View() string {
 	switch m.screen {
 	case screenSearch:
 		b.WriteString(renderSearchScreen(m, width))
+	case screenDevices:
+		b.WriteString(renderDevicesScreen(m, width))
 	default:
 		b.WriteString(renderWidget(m.state, m.artRendered, m.cfg.ExperimentalKittyArt, width, m.marqueeTick))
 		b.WriteString("\n")

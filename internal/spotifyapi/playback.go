@@ -93,6 +93,14 @@ func (c *Client) SetRepeat(mode string) error {
 	return c.simpleAction(http.MethodPut, "/me/player/repeat?"+q.Encode())
 }
 
+// AddToQueue appends a track to the active device's playback queue:
+// POST /me/player/queue?uri=<uri>. Requires an active device (404 →
+// ErrNoActiveDevice otherwise), same as the other control endpoints.
+func (c *Client) AddToQueue(uri string) error {
+	q := url.Values{"uri": {uri}}
+	return c.simpleAction(http.MethodPost, "/me/player/queue?"+q.Encode())
+}
+
 // PlayResume resumes playback on the currently active device, no device
 // targeting.
 func (c *Client) PlayResume() error {

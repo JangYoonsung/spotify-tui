@@ -38,11 +38,12 @@ Control keys do an **optimistic update** (flip `m.state` locally) and set `actio
 
 ### Home screen layout (v3)
 
-There's no separate "playlists screen" or "track list screen" — `screenNowPlaying` renders the now-playing box, an always-visible playlists list, and (once a playlist is picked) that playlist's tracks, all stacked on one screen. `Model.focusTracks` decides whether up/down/enter drive the playlists list or the tracks list; both stay rendered regardless of focus. `screenSearch` is the one real secondary screen (needs a text input first).
+There's no separate "playlists screen" or "track list screen" — `screenNowPlaying` renders the now-playing box, an always-visible playlists list, and (once a playlist is picked) that playlist's tracks, all stacked on one screen. `Model.focusTracks` decides whether up/down/enter drive the playlists list or the tracks list; both stay rendered regardless of focus. Secondary screens: `screenSearch` (text input + results) and `screenDevices` (`d`; enter transfers playback to the selected device).
 
 ### Playback API notes (playback.go / playlists.go)
 
-- Device targeting: `PlayWithDeviceQuery` (device_id as a query param on `/me/player/play`) is the confirmed-working approach, verified empirically against real devices. `PlayWithDeviceBody` (device_id in the JSON body) 403s — not a documented field there. `PlayContext`/`PlayURIs` follow the query-param pattern with `context_uri`/`uris` in the body instead.
+- Device targeting: `PlayWithDeviceQuery` (device_id as a query param on `/me/player/play`) is the confirmed-working approach, verified empirically against real devices. `PlayWithDeviceBody` (device_id in the JSON body) 403s — not a documented field there. `PlayContext`/`PlayURIs` follow the query-param pattern with `context_uri`/`uris` in the body instead. The device picker's "switch device" also uses `PlayWithDeviceQuery` — note its semantics are "play on this device", so switching while paused starts playback.
+- `AddToQueue` (`POST /me/player/queue?uri=`) needs an active device (404 → `ErrNoActiveDevice`), like the other control endpoints. Queueing is track-only — device rows have no `trackURI`, which is what the `a`-key guard in `handleListKey` relies on.
 - Playlist tracks live at `GET /playlists/<id>/items` (not `/tracks` — renamed in Spotify's February 2026 Web API migration, along with the response's `track` field becoming `item`). This app is also in Development Mode (no Extended Quota Mode), which limits this endpoint to playlists you created or collaborate on.
 - `GET /me/playlists`'s `tracks` field returns `null` post-migration — don't display a "(N tracks)" count from it, it's always 0/wrong.
 

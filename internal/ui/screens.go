@@ -10,6 +10,10 @@ const (
 	// focus (see Model.focusTracks).
 	screenNowPlaying screen = iota
 	screenSearch
+	// screenDevices lists Spotify Connect devices; enter transfers playback
+	// there via PlayWithDeviceQuery (the confirmed-working targeting slot —
+	// see the diagnostics notes in spotifyapi/playback.go).
+	screenDevices
 )
 
 // listItem is a pre-rendered, selectable row. Playlist rows only carry id

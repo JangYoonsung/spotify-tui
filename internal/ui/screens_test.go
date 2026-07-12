@@ -1,6 +1,11 @@
 package ui
 
-import "testing"
+import (
+	"strings"
+	"testing"
+
+	"github.com/jangyoonsung/spotify-tui-go/internal/spotifyapi"
+)
 
 func TestListStateMoveCursor(t *testing.T) {
 	mk := func(n int) listState {
@@ -56,6 +61,29 @@ func TestListStateMoveCursor(t *testing.T) {
 			t.Fatalf("scrollTop = %d, want 5 (cursor moved above old scrollTop)", l.scrollTop)
 		}
 	})
+}
+
+func TestDeviceItems(t *testing.T) {
+	devices := []spotifyapi.Device{
+		{ID: "dev1", Name: "MacBook", Type: "Computer", IsActive: true},
+		{ID: "dev2", Name: "Kitchen", Type: "Speaker"},
+	}
+	items := deviceItems(devices)
+	if len(items) != 2 {
+		t.Fatalf("got %d items, want 2", len(items))
+	}
+	if items[0].id != "dev1" || items[1].id != "dev2" {
+		t.Fatalf("ids not preserved: %+v", items)
+	}
+	if !strings.Contains(items[0].label, "active") {
+		t.Fatalf("active device label missing marker: %q", items[0].label)
+	}
+	if strings.Contains(items[1].label, "active") {
+		t.Fatalf("inactive device label wrongly marked active: %q", items[1].label)
+	}
+	if items[0].trackURI != "" {
+		t.Fatalf("device rows must have no trackURI (queue-add guard relies on it): %q", items[0].trackURI)
+	}
 }
 
 func TestListStateSelected(t *testing.T) {

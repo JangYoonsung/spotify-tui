@@ -51,6 +51,11 @@ type artResultMsg struct {
 	err     error
 }
 
+type devicesResultMsg struct {
+	devices []spotifyapi.Device
+	err     error
+}
+
 const (
 	artCols = 12
 	artRows = 6
@@ -93,6 +98,13 @@ func searchCmd(client *spotifyapi.Client, query string) tea.Cmd {
 	return func() tea.Msg {
 		results, err := client.SearchTracks(query, 20)
 		return searchResultMsg{tracks: results.Tracks, err: err}
+	}
+}
+
+func devicesCmd(client *spotifyapi.Client) tea.Cmd {
+	return func() tea.Msg {
+		devices, err := client.GetDevices()
+		return devicesResultMsg{devices: devices, err: err}
 	}
 }
 
@@ -214,6 +226,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case devicesResultMsg:
+		m.devices.loading = false
+		m.devices.err = msg.err
+		if msg.err == nil {
+			m.devices.items = deviceItems(msg.devices)
+			m.devices.cursor, m.devices.scrollTop = 0, 0
+		}
+		return m, nil
+
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 	}
@@ -245,6 +266,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.search = listState{}
 		m.searchInput.Reset()
 		return m, m.searchInput.Focus()
+	case key.Matches(msg, keys.Devices) && m.screen == screenNowPlaying:
+		m.screen = screenDevices
+		m.devices = listState{loading: true}
+		return m, devicesCmd(m.client)
 	case key.Matches(msg, keys.Refresh):
 		return m, tea.Batch(refreshCmd(m.client), playlistsCmd(m.client))
 	}
@@ -252,6 +277,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch m.screen {
 	case screenSearch:
 		return m.handleListKey(&m.search, msg, m.playTrackSelection)
+	case screenDevices:
+		return m.handleListKey(&m.devices, msg, m.transferToDevice)
 	default:
 		return m.handleNowPlayingKey(msg)
 	}
@@ -277,6 +304,13 @@ func (m Model) handleNowPlayingKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			m.actionInFlight = true
 			return m, m.playTrackSelection(item)
+		case key.Matches(msg, keys.QueueAdd):
+			item, ok := m.playlistTracks.selected()
+			if !ok {
+				return m, nil
+			}
+			m.actionInFlight = true
+			return m, m.queueTrack(item)
 		}
 	} else {
 		switch {
@@ -349,8 +383,46 @@ func (m Model) handleListKey(list *listState, msg tea.KeyMsg, play func(listItem
 		m.screen = screenNowPlaying
 		m.actionInFlight = true
 		return m, play(item)
+	case key.Matches(msg, keys.QueueAdd):
+		item, ok := list.selected()
+		if !ok || item.trackURI == "" {
+			// Device rows have no trackURI — queueing is track-only.
+			return m, nil
+		}
+		// Stay on the current screen so several tracks can be queued in a row.
+		m.actionInFlight = true
+		return m, m.queueTrack(item)
 	}
 	return m, nil
+}
+
+// queueTrack appends the selected track to the active device's queue —
+// playback keeps going, nothing is interrupted.
+func (m Model) queueTrack(item listItem) tea.Cmd {
+	uri := item.trackURI
+	client := m.client
+	return actionCmd(func() error {
+		if uri == "" {
+			return fmt.Errorf("selected item has no track URI")
+		}
+		return client.AddToQueue(uri)
+	})
+}
+
+// transferToDevice moves playback to the selected Connect device using
+// PlayWithDeviceQuery — the empirically confirmed targeting slot (the
+// documented TransferPlayback endpoint 404s, see spotifyapi/playback.go).
+// Note this also resumes playback if it was paused; that's the endpoint's
+// semantics ("play on this device"), acceptable for a "switch device" action.
+func (m Model) transferToDevice(item listItem) tea.Cmd {
+	deviceID := item.id
+	client := m.client
+	return actionCmd(func() error {
+		if deviceID == "" {
+			return fmt.Errorf("selected device has no ID")
+		}
+		return client.PlayWithDeviceQuery(deviceID)
+	})
 }
 
 // playTrackSelection always returns a real Cmd resolving to an
@@ -401,6 +473,21 @@ func trackItems(tracks []spotifyapi.Track) []listItem {
 			id:       t.ID,
 			trackURI: "spotify:track:" + t.ID,
 		})
+	}
+	return items
+}
+
+func deviceItems(devices []spotifyapi.Device) []listItem {
+	items := make([]listItem, 0, len(devices))
+	for _, d := range devices {
+		label := d.Name
+		if d.Type != "" {
+			label += " · " + d.Type
+		}
+		if d.IsActive {
+			label += "  ● active"
+		}
+		items = append(items, listItem{label: label, id: d.ID})
 	}
 	return items
 }

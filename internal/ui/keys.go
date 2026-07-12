@@ -13,6 +13,8 @@ type keyMap struct {
 	Repeat     key.Binding
 	Refresh    key.Binding
 	Search     key.Binding
+	Devices    key.Binding
+	QueueAdd   key.Binding
 	Escape     key.Binding
 	Up         key.Binding
 	Down       key.Binding
@@ -60,6 +62,14 @@ var keys = keyMap{
 		key.WithKeys("/"),
 		key.WithHelp("/", "search"),
 	),
+	Devices: key.NewBinding(
+		key.WithKeys("d"),
+		key.WithHelp("d", "devices"),
+	),
+	QueueAdd: key.NewBinding(
+		key.WithKeys("a"),
+		key.WithHelp("a", "queue"),
+	),
 	Escape: key.NewBinding(
 		key.WithKeys("esc"),
 		key.WithHelp("esc", "back"),
@@ -81,10 +91,12 @@ var keys = keyMap{
 func helpLine(s screen, focusTracks bool) string {
 	switch s {
 	case screenSearch:
-		return footerStyle.Render("type query  enter search/play  ↑/↓ move  esc back  " + keys.Quit.Help().Key + " quit")
+		return footerStyle.Render("type query  enter search/play  a queue  ↑/↓ move  esc back  " + keys.Quit.Help().Key + " quit")
+	case screenDevices:
+		return footerStyle.Render("↑/↓ move  enter switch playback  esc back  " + keys.Quit.Help().Key + " quit")
 	default:
 		if focusTracks {
-			return footerStyle.Render("↑/↓ move  enter play track  esc back to playlists  " + keys.Quit.Help().Key + " quit")
+			return footerStyle.Render("↑/↓ move  enter play track  a queue  esc back to playlists  " + keys.Quit.Help().Key + " quit")
 		}
 		return footerStyle.Render(
 			keys.PlayPause.Help().Key + " " + keys.PlayPause.Help().Desc + "  " +
@@ -94,6 +106,7 @@ func helpLine(s screen, focusTracks bool) string {
 				keys.Shuffle.Help().Key + " shuffle  " +
 				keys.Repeat.Help().Key + " repeat  " +
 				keys.Search.Help().Key + " search  " +
+				keys.Devices.Help().Key + " devices  " +
 				"↑/↓ playlists  enter open tracks  " +
 				keys.Quit.Help().Key + " quit",
 		)

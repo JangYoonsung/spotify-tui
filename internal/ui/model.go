@@ -23,6 +23,7 @@ type Model struct {
 	search      listState
 	searchInput textinput.Model
 	playlists   listState
+	devices     listState
 
 	playlistTracks      listState
 	playlistTracksTitle string
