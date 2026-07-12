@@ -340,58 +340,64 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// (autoplay chains, single tracks). Shuffle randomizes order,
 			// so position means nothing there; repeat-one's real "next" is
 			// itself.
-			ctxID, hasCtx := strings.CutPrefix(m.state.ContextURI, "spotify:playlist:")
-			contextOrdered := false
-			// repeat=off only: with repeat=context the wrap to the first
-			// track is real and the queue reports it correctly.
-			if m.state.RepeatState == "off" && !m.state.ShuffleState && hasCtx && ctxID == m.currentPlaylistID {
-				items := m.playlistTracks.list.Items()
-				for i, it := range items {
-					li, ok := it.(listItem)
-					if !ok || li.id != msg.forTrackID {
-						continue
-					}
-					contextOrdered = true
-					if i+1 < len(items) {
-						if nxt, ok := items[i+1].(listItem); ok {
-							m.nextTrack = nxt.label
-						}
-					}
-					// Last list entry: leave nextTrack empty — the queue's
-					// wrap-around claim is fake, and empty is what lets the
-					// autoplay seed fire below.
+			// A real queue entry (something actually queued after the
+			// current track) is whatever's first that isn't the current
+			// track — but the queue endpoint pads with the current track and
+			// reports playlist wrap-arounds, so this alone isn't trusted.
+			var firstQueued *spotifyapi.Track
+			for i := range msg.tracks {
+				if msg.tracks[i].ID != msg.forTrackID {
+					firstQueued = &msg.tracks[i]
 					break
 				}
 			}
-			if !contextOrdered {
-				for _, t := range msg.tracks {
-					if t.ID != msg.forTrackID {
-						m.nextTrack = trackLabel(t)
+
+			// Is the current track being played in order from a playlist the
+			// tracks box is showing? Then the LIST order is the trustworthy
+			// "next" — UNLESS the queue's first entry is a track from outside
+			// that playlist, which means autoplay or a manual queue-add took
+			// over and the queue is now the truth (this was the bug: playlist
+			// order was shown even after an autoplay track was queued).
+			// Shuffle randomizes order; station/other contexts fail the
+			// prefix check and fall through to the queue.
+			ctxID, hasCtx := strings.CutPrefix(m.state.ContextURI, "spotify:playlist:")
+			contextOrdered := false
+			if m.state.RepeatState == "off" && !m.state.ShuffleState && hasCtx && ctxID == m.currentPlaylistID {
+				items := m.playlistTracks.list.Items()
+				inPlaylist := make(map[string]bool, len(items))
+				for _, it := range items {
+					if li, ok := it.(listItem); ok {
+						inPlaylist[li.id] = true
+					}
+				}
+				queueTookOver := firstQueued != nil && !inPlaylist[firstQueued.ID]
+				if !queueTookOver {
+					for i, it := range items {
+						li, ok := it.(listItem)
+						if !ok || li.id != msg.forTrackID {
+							continue
+						}
+						contextOrdered = true
+						if i+1 < len(items) {
+							if nxt, ok := items[i+1].(listItem); ok {
+								m.nextTrack = nxt.label
+							}
+						}
+						// Last list entry: leave nextTrack empty rather than
+						// showing the queue's fake wrap-around to the first
+						// track. autoplay (playbackEnded) takes over once it
+						// actually stops.
 						break
 					}
 				}
-				if m.nextTrack == "" && len(msg.tracks) > 0 && m.state.RepeatState == "track" {
+			}
+			if !contextOrdered {
+				if firstQueued != nil {
+					m.nextTrack = trackLabel(*firstQueued)
+				} else if len(msg.tracks) > 0 && m.state.RepeatState == "track" {
 					m.nextTrack = trackLabel(msg.tracks[0])
 				}
 			}
-			// Queue genuinely empty while still playing: seed similar
-			// tracks into the real queue now, so playback rolls straight
-			// into them (and they show up as "next" / on the queue screen).
-			// Once per track — a failed seed leaves the playbackEnded
-			// backup path to catch the stop.
-			if m.nextTrack == "" && m.state.IsPlaying &&
-				m.state.RepeatState != "track" && m.autoplaySeededFor != m.state.Item.ID {
-				m.autoplaySeededFor = m.state.Item.ID
-				return m, m.seedAutoplayCmd(m.state.Item)
-			}
-		}
-		return m, nil
-
-	case autoplaySeedResultMsg:
-		// Success: refetch the queue so the seeded tracks appear as "next".
-		// Failure is silent — the playbackEnded backup still fires.
-		if msg.err == nil && m.state != nil && m.state.Item.ID == msg.forTrackID {
-			return m, queueCmd(m.client, msg.forTrackID)
 		}
 		return m, nil
 
@@ -428,13 +434,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.playlistTracks.err = msg.err
 		if msg.err == nil {
 			m.playlistTracks.setItems(trackItems(msg.tracks))
-			if m.state != nil {
-				m.playlistTracks.setNowPlaying(m.state.Item.ID)
-			}
 			// One-shot: only the restart restore — playlists opened later
 			// (or a re-fetch) start at the top as usual.
 			m.playlistTracks.selectID(m.restoreTrackID)
 			m.restoreTrackID = ""
+			if m.state != nil {
+				m.playlistTracks.setNowPlaying(m.state.Item.ID)
+				// The "next" label judges the queue against this track list
+				// (wrap-around at the playlist's end, autoplay takeover). A
+				// queue poll that landed before the list finished loading
+				// judged against an empty list and fell back to the raw
+				// queue — re-poll now that the list is here so the last
+				// track's fake wrap-around is suppressed.
+				if id, ok := strings.CutPrefix(m.state.ContextURI, "spotify:playlist:"); ok && id == m.currentPlaylistID {
+					return m, queueCmd(m.client, m.state.Item.ID)
+				}
+			}
 		}
 		return m, nil
 
@@ -868,39 +883,6 @@ func (m Model) autoplaySimilarCmd(last spotifyapi.Track) tea.Cmd {
 		}
 		return client.PlayURIs(deviceID, uris)
 	})
-}
-
-// autoplaySeedResultMsg reports the queue-seeding attempt (below).
-type autoplaySeedResultMsg struct {
-	forTrackID string
-	err        error
-}
-
-// seedAutoplayCmd is the primary autoplay path: while the LAST queued track
-// is still playing, push similar tracks into the real Spotify queue
-// (AddToQueue) — playback then continues seamlessly without this widget
-// having to detect the stop, and the "next" label and queue screen show the
-// seeded tracks like any other queue content.
-func (m Model) seedAutoplayCmd(last spotifyapi.Track) tea.Cmd {
-	client := m.client
-	exclude := m.autoplayExcludes(last)
-	query := last.Name
-	if len(last.Artists) > 0 {
-		query = last.Artists[0]
-	}
-	forID := last.ID
-	return func() tea.Msg {
-		uris := m.similarTrackURIs(last, exclude, 2)
-		if len(uris) == 0 {
-			return autoplaySeedResultMsg{forTrackID: forID, err: fmt.Errorf("no similar tracks for %q", query)}
-		}
-		for _, u := range uris {
-			if err := client.AddToQueue(u); err != nil {
-				return autoplaySeedResultMsg{forTrackID: forID, err: err}
-			}
-		}
-		return autoplaySeedResultMsg{forTrackID: forID}
-	}
 }
 
 // resolveDeviceAndRun wraps run with device resolution: prefer the device

@@ -67,10 +67,6 @@ type Model struct {
 	likedCurrent bool
 	likedForID   string
 
-	// autoplaySeededFor marks the track a similar-tracks queue seed was
-	// already attempted for, so the seed fires once per track, not on every
-	// queue refetch.
-	autoplaySeededFor string
 	// lastContextURI tracks what playback is playing FROM — when it changes
 	// to a playlist this box isn't showing (e.g. playback started from the
 	// phone), the tracks box follows it. Only on the change edge, so the

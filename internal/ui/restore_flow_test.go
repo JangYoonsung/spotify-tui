@@ -334,45 +334,86 @@ func TestQueueWrapAroundSuppressed(t *testing.T) {
 	if got := next.(Model).nextTrack; got != "Last" {
 		t.Fatalf("mid-playlist: nextTrack = %q, want \"Last\"", got)
 	}
+
+	// Autoplay/manual queue took over: mid-playlist, but the queue's first
+	// entry is a track from OUTSIDE the playlist — the queue is now the
+	// truth, not the playlist order. (Regression: playlist order was shown
+	// even after an autoplay track was queued.)
+	m.state = &spotifyapi.PlaybackState{IsPlaying: true, RepeatState: "off", ContextURI: ctx, Item: spotifyapi.Track{ID: "a", Name: "First"}}
+	next, _ = m.Update(queueResultMsg{forTrackID: "a", tracks: []spotifyapi.Track{
+		{ID: "zzz", Name: "Autoplay Pick"}, // not in the playlist
+	}})
+	if got := next.(Model).nextTrack; got != "Autoplay Pick" {
+		t.Fatalf("autoplay takeover: nextTrack = %q, want \"Autoplay Pick\" (queue wins)", got)
+	}
 }
 
-// Full seed chain: last track of the playing context + wrap queue ->
-// nextTrack suppressed -> similar-tracks seed command fired, once.
-func TestSeedFiresOnLastContextTrack(t *testing.T) {
+// On the playlist's last track, the queue's fake wrap-around to the first
+// track must NOT become "next" — it's left empty (autoplay takes over only
+// when playback actually stops; we no longer pre-seed the queue).
+func TestLastContextTrackLeavesNextEmpty(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
 	m := New(nil, config.Config{})
 	next, _ := m.Update(playlistTracksResultMsg{tracks: []spotifyapi.Track{
-		{ID: "a", Name: "First"}, {ID: "b", Name: "Mid"}, {ID: "c", Name: "Last", Artists: []string{"Artist"}},
+		{ID: "a", Name: "First"}, {ID: "b", Name: "Mid"}, {ID: "c", Name: "Last"},
 	}})
 	m = next.(Model)
 	m.currentPlaylistID = "pl9"
 	m.state = &spotifyapi.PlaybackState{
 		IsPlaying: true, RepeatState: "off",
 		ContextURI: "spotify:playlist:pl9",
-		Item:       spotifyapi.Track{ID: "c", Name: "Last", Artists: []string{"Artist"}},
+		Item:       spotifyapi.Track{ID: "c", Name: "Last"},
 	}
 
-	wrapQueue := queueResultMsg{forTrackID: "c", tracks: []spotifyapi.Track{
+	// Queue wraps around to the playlist's first track — a lie at the end.
+	next, _ = m.Update(queueResultMsg{forTrackID: "c", tracks: []spotifyapi.Track{
 		{ID: "a", Name: "First"}, {ID: "b", Name: "Mid"},
-	}}
-	next, cmd := m.Update(wrapQueue)
+	}})
+	if got := next.(Model).nextTrack; got != "" {
+		t.Fatalf("last track: nextTrack = %q, want empty (wrap-around suppressed)", got)
+	}
+}
+
+// Race: the queue poll can land before the playlist's track list finishes
+// loading (playback started elsewhere, context-follow still fetching). The
+// early poll judges against an empty list and shows the raw queue's
+// wrap-around; loading the list must re-poll and suppress it.
+func TestQueueRepollAfterTracksLoad(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	m := New(nil, config.Config{})
+	m.currentPlaylistID = "pl9"
+	m.state = &spotifyapi.PlaybackState{
+		IsPlaying: true, RepeatState: "off",
+		ContextURI: "spotify:playlist:pl9",
+		Item:       spotifyapi.Track{ID: "c", Name: "Last"},
+	}
+
+	// Queue poll arrives FIRST, before the track list — judged against an
+	// empty list, so it shows the wrap-around first track.
+	next, _ := m.Update(queueResultMsg{forTrackID: "c", tracks: []spotifyapi.Track{
+		{ID: "a", Name: "First"}, {ID: "b", Name: "Mid"},
+	}})
 	m = next.(Model)
+	if m.nextTrack != "First" {
+		t.Fatalf("pre-load: nextTrack = %q, want \"First\" (raw queue, no list yet)", m.nextTrack)
+	}
 
-	if m.nextTrack != "" {
-		t.Fatalf("wrap not suppressed: nextTrack = %q", m.nextTrack)
-	}
-	if m.autoplaySeededFor != "c" {
-		t.Fatalf("seed not marked: autoplaySeededFor = %q, want c", m.autoplaySeededFor)
-	}
+	// Track list loads -> must re-poll the queue.
+	next, cmd := m.Update(playlistTracksResultMsg{tracks: []spotifyapi.Track{
+		{ID: "a", Name: "First"}, {ID: "b", Name: "Mid"}, {ID: "c", Name: "Last"},
+	}})
+	m = next.(Model)
 	if cmd == nil {
-		t.Fatalf("no seed command fired")
+		t.Fatalf("track list load did not re-poll the queue")
 	}
 
-	// Same queue result again: seed must NOT fire twice for the same track.
-	next, cmd = m.Update(wrapQueue)
-	if cmd != nil {
-		t.Fatalf("seed fired twice for the same track")
+	// The re-poll now judges against the loaded list: last track -> empty.
+	next, _ = m.Update(queueResultMsg{forTrackID: "c", tracks: []spotifyapi.Track{
+		{ID: "a", Name: "First"}, {ID: "b", Name: "Mid"},
+	}})
+	if got := next.(Model).nextTrack; got != "" {
+		t.Fatalf("post-load: nextTrack = %q, want empty (wrap-around suppressed)", got)
 	}
-	_ = next
 }
