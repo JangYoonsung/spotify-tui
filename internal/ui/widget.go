@@ -9,6 +9,8 @@ import (
 	"github.com/jangyoonsung/spotify-tui-go/internal/spotifyapi"
 )
 
+// defaultWidgetWidth is the fallback used only when bubbletea hasn't
+// reported a real terminal width yet (no WindowSizeMsg received).
 const defaultWidgetWidth = 56
 
 // renderWidget draws the now-playing box.
@@ -84,17 +86,17 @@ func renderWidget(state *spotifyapi.PlaybackState, art string, artIsGraphics boo
 }
 
 func nowPlayingLines(s spotifyapi.PlaybackState, art string, width, marqueeTick int) []string {
-	// progressLine sizes its bar off the width it's given — when art sits
-	// beside the text (JoinHorizontal), the text column is narrower than
-	// the full widget width by the art column plus its spacer, and passing
-	// the full width here made the bar overflow boxRow's inner width,
-	// silently truncating the timestamp off the end.
-	textWidth := width
+	// boxRow reserves 4 columns for its own "│ " + " │" border/padding —
+	// content sized off the full box width (rather than that minus 4)
+	// overflows boxRow's actual inner width and gets truncated with "…".
+	// This applied even with no art (textWidth used to be the bare width),
+	// not just the art-present case.
+	textWidth := width - 4
 	if art != "" {
-		textWidth = width - lipgloss.Width(strings.SplitN(art, "\n", 2)[0]) - 2
-		if textWidth < 20 {
-			textWidth = 20
-		}
+		textWidth -= lipgloss.Width(strings.SplitN(art, "\n", 2)[0]) + 2 // art column + its spacer
+	}
+	if textWidth < 20 {
+		textWidth = 20
 	}
 	text := strings.Join([]string{trackLine(s, textWidth, marqueeTick), progressLine(s, textWidth), statusLine(s), ""}, "\n")
 	if art == "" {
@@ -173,7 +175,12 @@ func windowByWidth(s string, startCol, width int) string {
 }
 
 func progressLine(s spotifyapi.PlaybackState, width int) string {
-	barWidth := width - 20
+	ts := formatMs(s.ProgressMs) + "/" + formatMs(s.Item.DurationMs)
+	// Reserve exactly what the timestamp actually needs (plus the space
+	// before it) instead of a flat guess — a fixed reservation either
+	// wastes width the bar could use (guess too generous) or overflows
+	// (guess too stingy); measuring the real string avoids both.
+	barWidth := width - lipgloss.Width(ts) - 1
 	if barWidth < 10 {
 		barWidth = 10
 	}
@@ -185,7 +192,7 @@ func progressLine(s spotifyapi.PlaybackState, width int) string {
 		filled = barWidth
 	}
 	bar := barFillStyle.Render(strings.Repeat("█", filled)) + dimStyle.Render(strings.Repeat("░", barWidth-filled))
-	return fmt.Sprintf("%s %s/%s", bar, formatMs(s.ProgressMs), formatMs(s.Item.DurationMs))
+	return bar + " " + ts
 }
 
 func statusLine(s spotifyapi.PlaybackState) string {
