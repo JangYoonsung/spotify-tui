@@ -44,6 +44,61 @@ func LoadUIState() UIState {
 	return s
 }
 
+// CachedTrack is the minimal track info needed to judge the queue against a
+// playlist (wrap-around detection) and to display radio/next labels. Cached
+// per playlist so a rate-limited or restarted session can still make those
+// judgments from the last good load instead of an empty list.
+type CachedTrack struct {
+	ID       string   `json:"id"`
+	Name     string   `json:"name"`
+	Artists  []string `json:"artists"`
+	Duration int      `json:"duration_ms"`
+}
+
+func tracksCachePath(playlistID string) (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	// playlistID is a base62 id (or the "__liked__" sentinel) — safe as a
+	// filename, but Clean-guard against any stray separators anyway.
+	safe := filepath.Base(playlistID)
+	return filepath.Join(home, ".config", "spotify-tui-go", "tracks", safe+".json"), nil
+}
+
+// SaveTracksCache persists a playlist's tracks; best-effort, errors ignored.
+func SaveTracksCache(playlistID string, tracks []CachedTrack) error {
+	path, err := tracksCachePath(playlistID)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	data, err := json.Marshal(tracks)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0o600)
+}
+
+// LoadTracksCache returns a playlist's cached tracks, or nil if none.
+func LoadTracksCache(playlistID string) []CachedTrack {
+	path, err := tracksCachePath(playlistID)
+	if err != nil {
+		return nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var tracks []CachedTrack
+	if err := json.Unmarshal(data, &tracks); err != nil {
+		return nil
+	}
+	return tracks
+}
+
 // SaveUIState persists s, creating the config directory if needed. Callers
 // may ignore the error for the same reason LoadUIState never fails.
 func SaveUIState(s UIState) error {

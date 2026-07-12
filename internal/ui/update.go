@@ -550,23 +550,36 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case playlistTracksResultMsg:
 		m.playlistTracks.loading = false
 		m.playlistTracks.err = msg.err
-		if msg.err == nil {
-			m.playlistTracks.setItems(trackItems(msg.tracks))
-			// One-shot: only the restart restore — playlists opened later
-			// (or a re-fetch) start at the top as usual.
-			m.playlistTracks.selectID(m.restoreTrackID)
-			m.restoreTrackID = ""
-			if m.state != nil {
-				m.playlistTracks.setNowPlaying(m.state.Item.ID)
-				// The "next" label judges the queue against this track list
-				// (wrap-around at the playlist's end, autoplay takeover). A
-				// queue poll that landed before the list finished loading
-				// judged against an empty list and fell back to the raw
-				// queue — re-poll now that the list is here so the last
-				// track's fake wrap-around is suppressed.
-				if id, ok := strings.CutPrefix(m.state.ContextURI, "spotify:playlist:"); ok && id == m.currentPlaylistID {
-					return m, queueCmd(m.client, m.state.Item.ID)
-				}
+		tracks := msg.tracks
+		if msg.err != nil {
+			// Failed load (often a rate limit): fall back to the last good
+			// cache so playlist-end/wrap judgments still work instead of
+			// showing the queue's wrap-around. No cache = leave it empty.
+			m.noteRateLimit(msg.err)
+			cached := config.LoadTracksCache(m.currentPlaylistID)
+			if len(cached) == 0 {
+				return m, nil
+			}
+			tracks = cachedToTracks(cached)
+			m.playlistTracks.err = nil
+		} else {
+			config.SaveTracksCache(m.currentPlaylistID, tracksToCached(tracks))
+		}
+		m.playlistTracks.setItems(trackItems(tracks))
+		// One-shot: only the restart restore — playlists opened later
+		// (or a re-fetch) start at the top as usual.
+		m.playlistTracks.selectID(m.restoreTrackID)
+		m.restoreTrackID = ""
+		if m.state != nil {
+			m.playlistTracks.setNowPlaying(m.state.Item.ID)
+			// The "next" label judges the queue against this track list
+			// (wrap-around at the playlist's end, autoplay takeover). A queue
+			// poll that landed before the list finished loading judged
+			// against an empty list and fell back to the raw queue — re-poll
+			// now that the list is here so the last track's fake wrap-around
+			// is suppressed.
+			if id, ok := strings.CutPrefix(m.state.ContextURI, "spotify:playlist:"); ok && id == m.currentPlaylistID {
+				return m, queueCmd(m.client, m.state.Item.ID)
 			}
 		}
 		return m, nil
@@ -1123,6 +1136,22 @@ func (m Model) playlistNameByID(id string) string {
 		}
 	}
 	return "Now Playing"
+}
+
+func tracksToCached(tracks []spotifyapi.Track) []config.CachedTrack {
+	out := make([]config.CachedTrack, 0, len(tracks))
+	for _, t := range tracks {
+		out = append(out, config.CachedTrack{ID: t.ID, Name: t.Name, Artists: t.Artists, Duration: t.DurationMs})
+	}
+	return out
+}
+
+func cachedToTracks(cached []config.CachedTrack) []spotifyapi.Track {
+	out := make([]spotifyapi.Track, 0, len(cached))
+	for _, c := range cached {
+		out = append(out, spotifyapi.Track{ID: c.ID, Name: c.Name, Artists: c.Artists, DurationMs: c.Duration})
+	}
+	return out
 }
 
 func trackLabel(t spotifyapi.Track) string {
