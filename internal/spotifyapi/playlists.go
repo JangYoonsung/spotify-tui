@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 )
 
 type Playlist struct {
@@ -46,7 +47,7 @@ type rawPlaylistsResponse struct {
 // limit=50). No pagination beyond the first page — a deliberate v3 scope
 // limit, not a bug.
 func (c *Client) GetPlaylists(limit int) ([]Playlist, error) {
-	q := url.Values{"limit": {fmt.Sprint(limit)}}
+	q := url.Values{"limit": {strconv.Itoa(limit)}}
 	resp, err := c.do(http.MethodGet, "/me/playlists?"+q.Encode(), nil, "")
 	if err != nil {
 		return nil, err
@@ -104,8 +105,8 @@ func (c *Client) GetPlaylistTracks(playlistID string) ([]Track, error) {
 	var tracks []Track
 	for offset := 0; offset < playlistTracksCap; offset += playlistTracksPageLimit {
 		q := url.Values{
-			"limit":  {fmt.Sprint(playlistTracksPageLimit)},
-			"offset": {fmt.Sprint(offset)},
+			"limit":  {strconv.Itoa(playlistTracksPageLimit)},
+			"offset": {strconv.Itoa(offset)},
 		}
 		resp, err := c.do(http.MethodGet, "/playlists/"+playlistID+"/items?"+q.Encode(), nil, "")
 		if err != nil {

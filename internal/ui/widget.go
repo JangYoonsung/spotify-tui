@@ -152,10 +152,9 @@ func trackLine(s spotifyapi.PlaybackState, liked bool, width, marqueeTick int) s
 		full += " — " + strings.Join(s.Item.Artists, ", ")
 	}
 
-	avail := width - lipgloss.Width(icon) - 2 // "  " between icon and text
-	if avail < 1 {
-		avail = 1
-	}
+	avail := max(
+		// "  " between icon and text
+		width-lipgloss.Width(icon)-2, 1)
 	if lipgloss.Width(full) <= avail {
 		return icon + "  " + titleTextStyle.Render(full)
 	}
@@ -212,10 +211,7 @@ func progressLine(s spotifyapi.PlaybackState, width int) string {
 	// before it) instead of a flat guess — a fixed reservation either
 	// wastes width the bar could use (guess too generous) or overflows
 	// (guess too stingy); measuring the real string avoids both.
-	barWidth := width - lipgloss.Width(ts) - 1
-	if barWidth < 10 {
-		barWidth = 10
-	}
+	barWidth := max(width-lipgloss.Width(ts)-1, 10)
 	filled := 0
 	if s.Item.DurationMs > 0 {
 		filled = barWidth * s.ProgressMs / s.Item.DurationMs
@@ -258,13 +254,7 @@ func statusLine(s spotifyapi.PlaybackState) string {
 // a quick-glance shape reads faster than parsing digits.
 func volumeBar(pct int) string {
 	const segments = 5
-	filled := (pct*segments + 50) / 100
-	if filled > segments {
-		filled = segments
-	}
-	if filled < 0 {
-		filled = 0
-	}
+	filled := max(min((pct*segments+50)/100, segments), 0)
 	return accentStyle.Render(strings.Repeat("▮", filled)) + dimStyle.Render(strings.Repeat("▯", segments-filled))
 }
 

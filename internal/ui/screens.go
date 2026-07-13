@@ -204,5 +204,5 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 		dur := strings.Repeat(" ", d.durationCol-lipgloss.Width(it.duration)) + it.duration
 		line += durStyle.Render(" " + dur)
 	}
-	fmt.Fprint(w, line)
+	_, _ = fmt.Fprint(w, line)
 }

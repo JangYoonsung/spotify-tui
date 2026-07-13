@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 )
 
 const (
@@ -19,8 +20,8 @@ func (c *Client) GetSavedTracks() ([]Track, error) {
 	var tracks []Track
 	for offset := 0; offset < savedTracksCap; offset += savedTracksPageLimit {
 		q := url.Values{
-			"limit":  {fmt.Sprint(savedTracksPageLimit)},
-			"offset": {fmt.Sprint(offset)},
+			"limit":  {strconv.Itoa(savedTracksPageLimit)},
+			"offset": {strconv.Itoa(offset)},
 		}
 		resp, err := c.do(http.MethodGet, "/me/tracks?"+q.Encode(), nil, "")
 		if err != nil {

@@ -1,6 +1,7 @@
 package spotifyapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -53,7 +54,9 @@ func (c *Client) do(method, path string, body io.Reader, contentType string) (*h
 	if err != nil {
 		return nil, fmt.Errorf("get access token: %w", err)
 	}
-	req, err := http.NewRequest(method, baseURL+path, body)
+	// Background context: request lifetime is bounded by c.http's timeout;
+	// the TUI has no per-call cancellation to thread through here.
+	req, err := http.NewRequestWithContext(context.Background(), method, baseURL+path, body)
 	if err != nil {
 		return nil, err
 	}

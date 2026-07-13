@@ -8,6 +8,7 @@ package spotifyradio
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -76,7 +77,7 @@ func retrieveClientToken(c *http.Client, deviceId string) (string, error) {
 	case pbhttp.ClientTokenResponseType_RESPONSE_GRANTED_TOKEN_RESPONSE:
 		return protoResp.GetGrantedToken().Token, nil
 	case pbhttp.ClientTokenResponseType_RESPONSE_CHALLENGES_RESPONSE:
-		return "", fmt.Errorf("clienttoken challenge not supported")
+		return "", errors.New("clienttoken challenge not supported")
 	default:
 		return "", fmt.Errorf("unknown clienttoken response type: %v", protoResp.ResponseType)
 	}

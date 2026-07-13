@@ -102,10 +102,7 @@ func boxTopStyled(title, trailing string, width int, border, titleStyle lipgloss
 	// Same plain-width arithmetic as before, but the title and trailing
 	// counter get their own styles instead of inheriting the border color —
 	// segment widths must add up to exactly `width` (see the box tests).
-	fill := width - 8 - lipgloss.Width(title) - lipgloss.Width(trailing)
-	if fill < 0 {
-		fill = 0
-	}
+	fill := max(width-8-lipgloss.Width(title)-lipgloss.Width(trailing), 0)
 	return border.Render(boxTL+boxH+" ") + titleStyle.Render(title) +
 		border.Render(" "+strings.Repeat(boxH, fill)+" ") + dimStyle.Render(trailing) +
 		border.Render(" "+boxH+boxTR)
@@ -122,9 +119,6 @@ func boxRowStyled(content string, width int, style lipgloss.Style) string {
 		content = ansi.Truncate(content, inner, "…")
 		visible = lipgloss.Width(content)
 	}
-	pad := inner - visible
-	if pad < 0 {
-		pad = 0
-	}
+	pad := max(inner-visible, 0)
 	return style.Render(boxV) + " " + content + strings.Repeat(" ", pad) + " " + style.Render(boxV)
 }

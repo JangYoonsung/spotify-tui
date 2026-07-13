@@ -2,6 +2,7 @@ package spotifyauth
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -42,13 +43,13 @@ func RunCallbackServer(port int, expectedState string) (code string, err error) 
 			return
 		}
 		if q.Get("state") != expectedState {
-			send(result{err: fmt.Errorf("state mismatch — possible CSRF, aborting")})
+			send(result{err: errors.New("state mismatch — possible CSRF, aborting")})
 			_, _ = fmt.Fprint(w, "Authorization failed (state mismatch) — you can close this tab.")
 			return
 		}
 		c := q.Get("code")
 		if c == "" {
-			send(result{err: fmt.Errorf("no code in callback")})
+			send(result{err: errors.New("no code in callback")})
 			_, _ = fmt.Fprint(w, "Authorization failed (no code) — you can close this tab.")
 			return
 		}
@@ -57,7 +58,8 @@ func RunCallbackServer(port int, expectedState string) (code string, err error) 
 	})
 
 	addr := fmt.Sprintf("127.0.0.1:%d", port)
-	ln, err := net.Listen("tcp", addr)
+	lc := net.ListenConfig{}
+	ln, err := lc.Listen(context.Background(), "tcp", addr)
 	if err != nil {
 		return "", fmt.Errorf("listen on %s: %w", addr, err)
 	}
@@ -74,11 +76,13 @@ func RunCallbackServer(port int, expectedState string) (code string, err error) 
 	case res := <-resultCh:
 		return res.code, res.err
 	case <-time.After(120 * time.Second):
-		return "", fmt.Errorf("timed out waiting for Spotify login (120s)")
+		return "", errors.New("timed out waiting for Spotify login (120s)")
 	}
 }
 
 // OpenBrowser launches the system default browser at url (macOS `open`).
+// The launched process is fire-and-forget and outlives any request context,
+// so a context here would be meaningless.
 func OpenBrowser(url string) error {
-	return exec.Command("open", url).Start()
+	return exec.Command("open", url).Start() //nolint:noctx // detached one-shot browser launch
 }

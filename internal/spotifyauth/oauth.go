@@ -1,7 +1,9 @@
 package spotifyauth
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -62,7 +64,13 @@ type tokenResponse struct {
 }
 
 func postForm(body url.Values) (Token, error) {
-	resp, err := http.PostForm(tokenURL, body)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, tokenURL,
+		strings.NewReader(body.Encode()))
+	if err != nil {
+		return Token{}, fmt.Errorf("build token request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return Token{}, fmt.Errorf("token request: %w", err)
 	}
@@ -104,7 +112,7 @@ func ExchangeCode(clientID, redirectURI, code, verifier string) (Token, error) {
 		return Token{}, err
 	}
 	if tok.RefreshToken == "" {
-		return Token{}, fmt.Errorf("token exchange succeeded but no refresh_token was returned")
+		return Token{}, errors.New("token exchange succeeded but no refresh_token was returned")
 	}
 	return tok, nil
 }

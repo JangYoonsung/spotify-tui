@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 )
 
@@ -71,7 +72,7 @@ const searchLimitCap = 10
 func (c *Client) GetRecommendations(seedTrackID string, limit int) ([]Track, error) {
 	q := url.Values{
 		"seed_tracks": {seedTrackID},
-		"limit":       {fmt.Sprint(limit)},
+		"limit":       {strconv.Itoa(limit)},
 	}
 	resp, err := c.do(http.MethodGet, "/recommendations?"+q.Encode(), nil, "")
 	if err != nil {
@@ -133,7 +134,7 @@ func (c *Client) GetArtistTopTracks(artistID string) ([]Track, error) {
 
 // GetMyTopTracks: GET /me/top/tracks (needs user-top-read).
 func (c *Client) GetMyTopTracks(limit int) ([]Track, error) {
-	q := url.Values{"limit": {fmt.Sprint(limit)}}
+	q := url.Values{"limit": {strconv.Itoa(limit)}}
 	resp, err := c.do(http.MethodGet, "/me/top/tracks?"+q.Encode(), nil, "")
 	if err != nil {
 		return nil, err
@@ -169,7 +170,7 @@ func (c *Client) SearchTracks(query string, limit int) (SearchResults, error) {
 	q := url.Values{
 		"q":     {query},
 		"type":  {"track"},
-		"limit": {fmt.Sprint(limit)},
+		"limit": {strconv.Itoa(limit)},
 	}
 	resp, err := c.do(http.MethodGet, "/search?"+q.Encode(), nil, "")
 	if err != nil {

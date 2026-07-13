@@ -215,10 +215,6 @@ func radioCmd(client *spotifyapi.Client, contextURI string) tea.Cmd {
 	}
 }
 
-// atPlaylistEnd reports whether playback is sitting on the last track of the
-// playlist the tracks box is showing, played straight (no shuffle/repeat).
-// There the queue endpoint reports a fake wrap-around to the first track, so
-// callers substitute Spotify's real radio autoplay instead.
 // noteRateLimit records a 429's back-off window so tickMsg suspends polling
 // until it passes.
 func (m *Model) noteRateLimit(err error) {
@@ -231,6 +227,10 @@ func (m *Model) noteRateLimit(err error) {
 	}
 }
 
+// atPlaylistEnd reports whether playback is sitting on the last track of the
+// playlist the tracks box is showing, played straight (no shuffle/repeat).
+// There the queue endpoint reports a fake wrap-around to the first track, so
+// callers substitute Spotify's real radio autoplay instead.
 func (m Model) atPlaylistEnd() bool {
 	if m.state == nil || m.state.RepeatState != "off" || m.state.ShuffleState {
 		return false
@@ -563,7 +563,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			tracks = cachedToTracks(cached)
 			m.playlistTracks.err = nil
 		} else {
-			config.SaveTracksCache(m.currentPlaylistID, tracksToCached(tracks))
+			_ = config.SaveTracksCache(m.currentPlaylistID, tracksToCached(tracks))
 		}
 		m.playlistTracks.setItems(trackItems(tracks))
 		// One-shot: only the restart restore — playlists opened later
@@ -886,7 +886,7 @@ func (m Model) queueTrack(item listItem) tea.Cmd {
 	client := m.client
 	return actionCmd(func() error {
 		if uri == "" {
-			return fmt.Errorf("selected item has no track URI")
+			return errors.New("selected item has no track URI")
 		}
 		return client.AddToQueue(uri)
 	})
@@ -908,7 +908,7 @@ func (m Model) transferToDevice(item listItem) tea.Cmd {
 	}
 	return actionCmd(func() error {
 		if deviceID == "" {
-			return fmt.Errorf("selected device has no ID")
+			return errors.New("selected device has no ID")
 		}
 		return client.PlayWithDeviceQuery(deviceID)
 	})
@@ -1060,7 +1060,7 @@ func (m Model) resolveDeviceAndRun(run func(deviceID string) error) tea.Cmd {
 				}
 			}
 			if deviceID == "" {
-				return fmt.Errorf("no Spotify devices available — open Spotify on a device first")
+				return errors.New("no Spotify devices available — open Spotify on a device first")
 			}
 		}
 		return run(deviceID)
@@ -1072,7 +1072,7 @@ func (m Model) playTrackSelection(item listItem) tea.Cmd {
 	client := m.client
 	return m.resolveDeviceAndRun(func(deviceID string) error {
 		if trackURI == "" {
-			return fmt.Errorf("selected item has no track URI")
+			return errors.New("selected item has no track URI")
 		}
 		return client.PlayURIs(deviceID, []string{trackURI})
 	})
@@ -1088,7 +1088,7 @@ func (m Model) playPlaylistTrackSelection(item listItem) tea.Cmd {
 	client := m.client
 	return m.resolveDeviceAndRun(func(deviceID string) error {
 		if trackURI == "" {
-			return fmt.Errorf("selected item has no track URI")
+			return errors.New("selected item has no track URI")
 		}
 		if playlistID == "" {
 			return client.PlayURIs(deviceID, []string{trackURI})
@@ -1106,7 +1106,7 @@ func (m Model) playContextSelection(item listItem) tea.Cmd {
 	client := m.client
 	return m.resolveDeviceAndRun(func(deviceID string) error {
 		if playlistID == "" {
-			return fmt.Errorf("selected item has no playlist ID")
+			return errors.New("selected item has no playlist ID")
 		}
 		if playlistID == likedPlaylistID {
 			tracks, err := client.GetSavedTracks()
@@ -1114,7 +1114,7 @@ func (m Model) playContextSelection(item listItem) tea.Cmd {
 				return err
 			}
 			if len(tracks) == 0 {
-				return fmt.Errorf("no liked songs to play")
+				return errors.New("no liked songs to play")
 			}
 			uris := make([]string, 0, len(tracks))
 			for _, t := range tracks {
@@ -1271,13 +1271,7 @@ func (m Model) volumeStep(delta int) (tea.Model, tea.Cmd) {
 	if m.state == nil {
 		return m, nil
 	}
-	next := m.state.Device.VolumePercent + delta
-	if next < 0 {
-		next = 0
-	}
-	if next > 100 {
-		next = 100
-	}
+	next := min(max(m.state.Device.VolumePercent+delta, 0), 100)
 	m.actionInFlight = true
 	m.state.Device.VolumePercent = next
 	return m, actionCmd(func() error { return m.client.SetVolume(next) })

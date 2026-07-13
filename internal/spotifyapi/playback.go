@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 )
 
 // GetPlaybackState fetches GET /me/player. Returns (nil, nil) on 204 — that
@@ -73,7 +74,7 @@ func (c *Client) GetQueue() ([]Track, error) {
 // user-read-recently-played scope — probe with --diagnose-recent before
 // relying on it; the cached token may predate the scope being requested).
 func (c *Client) GetRecentlyPlayed(limit int) ([]Track, error) {
-	q := url.Values{"limit": {fmt.Sprint(limit)}}
+	q := url.Values{"limit": {strconv.Itoa(limit)}}
 	resp, err := c.do(http.MethodGet, "/me/player/recently-played?"+q.Encode(), nil, "")
 	if err != nil {
 		return nil, err
@@ -148,12 +149,12 @@ func (c *Client) Next() error     { return c.simpleAction(http.MethodPost, "/me/
 func (c *Client) Previous() error { return c.simpleAction(http.MethodPost, "/me/player/previous") }
 
 func (c *Client) SetVolume(percent int) error {
-	q := url.Values{"volume_percent": {fmt.Sprint(percent)}}
+	q := url.Values{"volume_percent": {strconv.Itoa(percent)}}
 	return c.simpleAction(http.MethodPut, "/me/player/volume?"+q.Encode())
 }
 
 func (c *Client) SetShuffle(on bool) error {
-	q := url.Values{"state": {fmt.Sprint(on)}}
+	q := url.Values{"state": {strconv.FormatBool(on)}}
 	return c.simpleAction(http.MethodPut, "/me/player/shuffle?"+q.Encode())
 }
 

@@ -1,0 +1,25 @@
+version: "2"
+
+linters:
+  default: none
+  enable:
+    # --- default set (explicitly listed for clarity) ---
+    - errcheck    # unchecked error return values
+    - govet       # suspicious constructs (same as go vet)
+    - ineffassign # assignments whose value is never used
+    - staticcheck # broad static analysis (SA*, QF*, S* checks)
+    - unused      # unused constants, variables, functions, types
+    # --- extra ---
+    - bodyclose   # HTTP response body not closed
+    - errorlint   # error wrapping issues (Go 1.13+)
+    - noctx       # HTTP requests without context
+    - modernize   # modernize Go idioms (any, strings.Cut, SplitSeq, etc.)
+    - perfsprint  # replace fmt.Sprintf/Errorf with faster alternatives
+    - intrange    # use integer range in for loops (Go 1.22+)
+    - misspell    # commonly misspelled English words
+    - gocritic    # bugs, performance, style diagnostics
+
+formatters:
+  enable:
+    - gofmt
+    - goimports

@@ -4,6 +4,7 @@
 package config
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -82,7 +83,7 @@ func Parse(args []string) (Config, error) {
 
 	cfg.ClientID = os.Getenv("SPOTIFY_TUI_CLIENT_ID")
 	if cfg.ClientID == "" {
-		return Config{}, fmt.Errorf("SPOTIFY_TUI_CLIENT_ID not set — put it in ./.env or ~/.config/spotify-tui-go/.env")
+		return Config{}, errors.New("SPOTIFY_TUI_CLIENT_ID not set — put it in ./.env or ~/.config/spotify-tui-go/.env")
 	}
 
 	return cfg, nil

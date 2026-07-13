@@ -19,6 +19,7 @@ package albumart
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -63,7 +64,7 @@ func PickImageURL(images []spotifyapi.Image, targetW, targetH int) string {
 // Halfblocks — see package doc for why that's opt-in only.
 func Render(imageURL string, cols, rows int, useKitty bool) (string, error) {
 	if imageURL == "" {
-		return "", fmt.Errorf("no image URL")
+		return "", errors.New("no image URL")
 	}
 
 	resp, err := httpClient.Get(imageURL) //nolint:gosec,noctx // fixed Spotify CDN URL from the API response, not user input
